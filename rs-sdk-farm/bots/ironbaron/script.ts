@@ -53,20 +53,13 @@ await runScript(
     }
 
     async function mineOne() {
-      const level = sdk.getSkill("Mining")?.level ?? 1;
-      const wantIron = level >= 15 && !ironFallback;
-      if (wantIron) {
-        const xpNow = sdk.getSkillXp("Mining") ?? 0;
-        if (ironXpMark === -1 || xpNow > ironXpMark) {
-          ironXpMark = xpNow;
-          ironAttempts = 0;
-        } else if (++ironAttempts >= 40) {
-          console.log("[IRONMN] Iron camped by the swarm — joining copper/tin");
-          ironFallback = true;
-        }
-      }
-      const pattern = wantIron && !ironFallback ? /iron/i : /copper|tin/i;
-      const rock = sdk.findNearbyLoc(pattern, { withOption: /mine/i });
+      // Rocks are all named "Rocks" — name patterns can never target an ore
+      // (learnings/mining.md). Mine any rock with a Mine option, like the
+      // proven PICKSWING loop; the mine's spawn mix decides the ore.
+      const rock = sdk
+        .getNearbyLocs()
+        .filter((l) => l.options?.some((o: string) => /mine/i.test(o)))
+        .sort((a: any, b: any) => (a.distance ?? 0) - (b.distance ?? 0))[0];
       if (rock) {
         try {
           await bot.interactLoc(rock, /mine/i);

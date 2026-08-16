@@ -12,7 +12,9 @@ await runScript(
     await bot.skipTutorial();
 
     const MEETING_POINT = { x: 3222, z: 3218 };
-    const LUMBRIDGE_MEN = { x: 3222, z: 3218 };
+    // East cluster (3230-3234) — clear of the dark wizards near (3220,3220)
+    // that killed the thief twice at the courtyard spot.
+    const LUMBRIDGE_MEN = { x: 3232, z: 3218 };
     // Hot-fix: Al Kharid toll gate is impassable to walkTo (dialog toll).
     // Varrock guards are the proper Thieving-40 target and gate-free.
     const AL_KHARID_WARRIORS = { x: 3207, z: 3381 }; // Varrock south gate guards
@@ -212,6 +214,25 @@ await runScript(
           await bot.pickpocketNpc(/^man$/i);
         } catch (_) {}
         await bot.dismissBlockingUI();
+        await eatIfLow(0.4);
+
+        // Failed pickpockets chip 1hp each — restock bread before it kills.
+        const hpState = sdk.getState()?.player;
+        if (
+          hpState &&
+          hpState.hp < hpState.maxHp * 0.5 &&
+          !sdk.findInventoryItem(/bread|kebab|shrimps/i) &&
+          sdk.countInventoryItems(/coins/i) >= 40
+        ) {
+          console.log("[FINGERS] Low HP, buying bread");
+          await bot.walkTo(3212, 3247);
+          try {
+            await bot.openShop(/shop.*keeper/i);
+            await bot.buyFromShop(/bread/i, 3);
+            await bot.closeShop();
+          } catch (_) {}
+          await bot.walkTo(LUMBRIDGE_MEN.x, LUMBRIDGE_MEN.z);
+        }
 
         if (sdk.getInventory().length >= 26) {
           await bankGold();
