@@ -3,7 +3,7 @@
 //   logs/supervisor.log  — process restarts
 //   logs/*.log           — trade + hub-survey + delivery events
 // Output: ../golden-throne-live.html (stable path — republished hourly).
-import { readFileSync, existsSync, writeFileSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, statSync } from "fs";
 
 const ROOT = import.meta.dir;
 const OUT = `${ROOT}/../golden-throne-live.html`;
@@ -27,6 +27,18 @@ const ROLES: Record<string, string> = {
 
 function readLines(p: string): string[] {
   return existsSync(p) ? readFileSync(p, "utf-8").split("\n").filter(Boolean) : [];
+}
+
+// Freshness = file mtime age. Logs are append-on-activity, so mtime is a
+// truthful liveness signal even when the observer pipeline is down.
+function ageMin(p: string): number {
+  try { return (Date.now() - statSync(p).mtimeMs) / 60000; } catch { return Infinity; }
+}
+function ageChip(p: string): string {
+  const a = ageMin(p);
+  const label = a === Infinity ? "no data" : a < 1 ? "live" : `${Math.round(a)}m ago`;
+  const cls = a < 6 ? "live" : a < 20 ? "warn" : "down";
+  return `<span class="pill ${cls}">${label}</span>`;
 }
 
 const recs: Rec[] = readLines(`${ROOT}/logs/metrics.jsonl`)
@@ -76,18 +88,22 @@ function botCard(bot: string): string {
     return `<div class="bot"><div class="bot-hd"><span class="pill down">NO DATA</span><b>${bot}</b></div>
       <div class="role">${role}</div></div>`;
   }
-  const ageMin = (now - new Date(last.ts).getTime()) / 60000;
+  const obsAge = (now - new Date(last.ts).getTime()) / 60000;
+  const logAge = ageMin(`${ROOT}/logs/${bot}.log`);
   const first = series[0];
   const hours = Math.max(0.05, (new Date(last.ts).getTime() - new Date(first.ts).getTime()) / 3600000);
   const lvlPerHr = series.length > 1 ? ((last.totalLvl - first.totalLvl) / hours).toFixed(1) : "–";
   const stalled =
     series.length >= 3 &&
     last.totalXp - series[series.length - 3].totalXp === 0;
-  const pill = ageMin > 10
-    ? `<span class="pill down">STALE ${Math.round(ageMin)}m</span>`
-    : stalled
+  // Liveness comes from the bot's OWN log activity; observer age is shown
+  // separately so a dead sampler can't paint a working fleet as stale.
+  const pill = logAge > 20
+    ? `<span class="pill down">SILENT ${Math.round(logAge)}m</span>`
+    : stalled && obsAge < 10
       ? `<span class="pill warn">STALLED</span>`
       : `<span class="pill live">LIVE</span>`;
+  const obsNote = obsAge > 10 ? ` · obs ${Math.round(obsAge)}m old` : "";
   const skills = Object.entries(last.xp)
     .sort((a, b) => b[1] - a[1]).slice(0, 5)
     .map(([k, v]) => `${k.slice(0, 5)} ${Math.round(v).toLocaleString()}xp`)
@@ -96,7 +112,7 @@ function botCard(bot: string): string {
     <div class="bot-hd">${pill}<b>${bot}</b><span class="lvl">${last.totalLvl}<small> total</small></span></div>
     <div class="role">${role}</div>
     ${spark(series)}
-    <div class="meta">+${lvlPerHr} lvl/hr · hp ${last.hp} · inv ${last.inv} · (${last.pos[0]},${last.pos[1]}) · ${last.nearbyPlayers} nearby</div>
+    <div class="meta">+${lvlPerHr} lvl/hr · hp ${last.hp} · inv ${last.inv} · (${last.pos[0]},${last.pos[1]}) · ${last.nearbyPlayers} nearby${obsNote}</div>
     <div class="skills">${skills || "no xp yet"}</div>
   </div>`;
 }
@@ -138,6 +154,33 @@ const lawBlock = lastStatusBlock("lawswarm.log", /\[lawswarm\] LAWSWARM /, /^\[l
 const kickBlock = lastStatusBlock("mankickers.log", /\[mankickers\] DISRUPTION /, /^\[mankickers\] {3}/);
 const lawsHeld = Number(lawBlock[0]?.match(/laws=(\d+)/)?.[1] ?? 0);
 const kicksThrown = Number(kickBlock[0]?.match(/kicks=(\d+)/)?.[1] ?? 0);
+
+// March progress per law unit: how far along Lumbridge->circle each one is.
+const CIRCLE = { x: 3225, z: 3374 };
+const MARCH_LEN = Math.hypot(3222 - CIRCLE.x, 3222 - CIRCLE.z); // spawn to circle
+const lawRows = lawBlock.slice(1).map((l) => {
+  const m = l.match(/(gtlaw\d+) cl=(\d+) hp=(\d+) laws=(\d+) xp=\d+ deaths=(\d+) pos=\((\d+),(\d+)\)\s*(\S*)/);
+  if (!m) return null;
+  const d = Math.hypot(Number(m[6]) - CIRCLE.x, Number(m[7]) - CIRCLE.z);
+  const pct = Math.max(0, Math.min(100, Math.round((1 - d / MARCH_LEN) * 100)));
+  return { bot: m[1], cl: m[2], hp: m[3], laws: m[4], deaths: m[5], x: m[6], z: m[7], fail: m[8] ?? "", d: Math.round(d), pct };
+}).filter(Boolean) as { bot: string; cl: string; hp: string; laws: string; deaths: string; x: string; z: string; fail: string; d: number; pct: number }[];
+
+// Attack rate: delta between the last two DISRUPTION headers (60s apart).
+const kickHeaders = readLines(`${ROOT}/logs/mankickers.log`)
+  .filter((l) => /DISRUPTION kicks=/.test(l)).slice(-2)
+  .map((l) => Number(l.match(/kicks=(\d+)/)?.[1] ?? 0) + Number(l.match(/punches=(\d+)/)?.[1] ?? 0));
+const attacksPerMin = kickHeaders.length === 2 ? kickHeaders[1] - kickHeaders[0] : 0;
+const kickRows = kickBlock.slice(1).map((l) => {
+  const m = l.match(/(mankicker\d+) cl=(\d+) hp=(\d+) style=(\S+) kicks=(\d+) punches=(\d+) xp=\d+ deaths=(\d+) pos=\((\d+),(\d+)\) @(\S+)/);
+  return m ? { bot: m[1], cl: m[2], hp: m[3], style: m[4], kicks: Number(m[5]), punches: Number(m[6]), deaths: m[7], post: m[10] } : null;
+}).filter(Boolean) as { bot: string; cl: string; hp: string; style: string; kicks: number; punches: number; deaths: string; post: string }[];
+const maxKicks = Math.max(1, ...kickRows.map((r) => r.kicks + r.punches));
+
+const obsAgeMin = ageMin(`${ROOT}/logs/metrics.jsonl`);
+const obsBanner = obsAgeMin > 10
+  ? `<div class="banner">observer sampler last wrote ${Math.round(obsAgeMin)}m ago — bot cards may lag; liveness pills use each bot's own log activity</div>`
+  : "";
 const fingersLine = readLines(`${ROOT}/logs/gtfingers.log`).filter((l) => /KNIGHT-PURSE/.test(l)).slice(-1)[0] ?? "";
 const fingersPicks = Number(fingersLine.match(/(\d+) picks/)?.[1] ?? 0);
 const ninjaLines = ["gtninja1", "gtninja2", "gtninja3"].map((n) => {
@@ -180,9 +223,16 @@ th{color:var(--text-lo);font-size:.52rem;letter-spacing:.14em;text-transform:upp
 .log{background:var(--surface);border:1px solid var(--border);padding:.5rem .7rem;font-size:.58rem;
 color:var(--text-lo);max-height:180px;overflow-y:auto;white-space:pre-wrap}
 .wrap{overflow-x:auto}
+.banner{background:rgba(196,90,90,.12);border:1px solid var(--down);color:var(--down);
+padding:.45rem .7rem;font-size:.6rem;letter-spacing:.06em;margin-bottom:.8rem}
+.bar{background:var(--border);height:6px;min-width:70px;position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--gold);display:block}
+.hdr-row{display:flex;align-items:center;gap:.5rem}
+.hdr-row h2{margin:0}
 </style>
 <h1>OPERATION GOLDEN THRONE — LIVE OPS</h1>
-<div class="sub">updated ${new Date().toISOString().replace("T", " ").slice(0, 16)} UTC · hourly pulse · ${recs.length} samples on record</div>
+<div class="sub">updated ${new Date().toISOString().replace("T", " ").slice(0, 16)} UTC · 13-min pulse · ${recs.length} samples on record</div>
+${obsBanner}
 <div class="tiles">
   <div class="tile"><b>${fleetTotal}</b><span>fleet total level</span></div>
   <div class="tile"><b>${liveCount}/${fleet.length}</b><span>bots live</span></div>
@@ -198,11 +248,22 @@ color:var(--text-lo);max-height:180px;overflow-y:auto;white-space:pre-wrap}
 <div class="wrap"><table><tr><th>hub</th><th>avg players</th><th>last</th><th>surveys</th></tr>
 ${hubRows.map((h) => `<tr><td>${h.hub}</td><td>${h.avg.toFixed(1)}</td><td>${h.last}</td><td>${h.n}</td></tr>`).join("")}
 </table></div>
-<h2>Law swarm — march to the dark wizard circle</h2>
-<div class="log">${lawBlock.join("\n") || "no status yet"}</div>
-<h2>Mankicker disruptors — Lumbridge pickpocket denial</h2>
-<div class="log">${kickBlock.join("\n") || "no status yet"}</div>
-<h2>Thief &amp; ninja fleet</h2>
+<div class="hdr-row"><h2>Law swarm — march to the dark wizard circle</h2>${ageChip(`${ROOT}/logs/lawswarm.log`)}</div>
+<div class="wrap"><table>
+<tr><th>unit</th><th>march progress</th><th>to circle</th><th>cl</th><th>hp</th><th>laws</th><th>deaths</th><th>pos</th><th>last failure</th></tr>
+${lawRows.map((r) => `<tr><td>${r.bot}</td>
+<td><div class="bar"><i style="width:${r.pct}%"></i></div></td>
+<td>${r.d} tiles</td><td>${r.cl}</td><td>${r.hp}</td><td>${r.laws}</td><td>${r.deaths}</td>
+<td>(${r.x},${r.z})</td><td>${r.fail || "—"}</td></tr>`).join("")}
+</table></div>
+<div class="hdr-row"><h2>Mankicker disruptors — Lumbridge pickpocket denial (${attacksPerMin}/min)</h2>${ageChip(`${ROOT}/logs/mankickers.log`)}</div>
+<div class="wrap"><table>
+<tr><th>unit</th><th>attacks</th><th>kicks</th><th>punches</th><th>style</th><th>cl</th><th>hp</th><th>deaths</th><th>post</th></tr>
+${kickRows.map((r) => `<tr><td>${r.bot}</td>
+<td><div class="bar"><i style="width:${Math.round(((r.kicks + r.punches) / maxKicks) * 100)}%"></i></div></td>
+<td>${r.kicks}</td><td>${r.punches}</td><td>${r.style}</td><td>${r.cl}</td><td>${r.hp}</td><td>${r.deaths}</td><td>${r.post}</td></tr>`).join("")}
+</table></div>
+<div class="hdr-row"><h2>Thief &amp; ninja fleet</h2>${ageChip(`${ROOT}/logs/gtfingers.log`)}</div>
 <div class="log">${[fingersLine.replace(/^\[\w+\] /, ""), ...ninjaLines].filter(Boolean).join("\n") || "no data"}</div>
 <h2>Recent trades</h2>
 <div class="log">${trades.slice(-12).join("\n") || "no trades yet"}</div>
