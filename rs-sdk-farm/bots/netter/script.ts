@@ -127,11 +127,19 @@ await runScript(
     console.log("[NETTER] Phase 1: Checking gear");
     await sdk.say("netter gearing up");
     if (!sdk.findInventoryItem(/fishing net/i)) {
-      console.log("[NETTER] No net in starter kit — buying at Lumbridge store");
-      await bot.walkTo(3212, 3247);
+      // Death strips the starter net; only Gerrant's at Port Sarim sells one.
+      console.log("[NETTER] No net — earning 30gp then buying at Port Sarim");
+      await bot.walkTo(3232, 3218);
+      for (let i = 0; i < 60 && sdk.countInventoryItems(/coins/i) < 30; i++) {
+        try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
+        await bot.dismissBlockingUI();
+      }
+      await walkWaypoints(SAFE_TO_DRAYNOR);
+      await bot.walkTo(3040, 3230);
+      await bot.walkTo(3014, 3224);
       try {
-        await bot.openShop(/shop.*keeper/i);
-        await bot.buyFromShop(/net/i, 1);
+        await bot.openShop(/gerrant/i);
+        await bot.buyFromShop(/small fishing net/i, 1);
         await bot.closeShop();
       } catch (_) {}
     }
@@ -139,9 +147,9 @@ await runScript(
     // ═══════════════════════════════════════════════════════
     //  PHASE 2: FISH FOREVER — shrimp at the safe swamp coast
     // ═══════════════════════════════════════════════════════
-    console.log("[NETTER] Phase 2: Fishing at swamp coast (3267,3148)");
+    console.log("[NETTER] Phase 2: Fishing at Draynor (north route)");
     await walkWaypoints(SAFE_TO_DRAYNOR);
-    await sdk.say("netter fishing at the swamp coast");
+    await sdk.say("netter fishing at draynor");
 
     while (true) {
       if (!(await isAlive())) {

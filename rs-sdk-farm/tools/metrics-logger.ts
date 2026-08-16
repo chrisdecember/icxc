@@ -62,7 +62,9 @@ async function sampleBot(name: string) {
     const hist = (prev[name] ??= []);
     hist.push({ totalXp, ts: Date.now() });
     if (hist.length > 3) hist.shift();
-    if (hist.length >= 3) {
+    // Merchants trade instead of grinding — zero XP is their normal state.
+    const MERCHANTS = /^(gtmule|gthawker|gtarb)$/;
+    if (hist.length >= 3 && !MERCHANTS.test(name)) {
       const [a, , c] = hist;
       if (c.totalXp - a.totalXp === 0) {
         console.log(
