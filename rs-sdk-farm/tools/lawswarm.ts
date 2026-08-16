@@ -65,8 +65,10 @@ const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|new
 const MARCH_WAYPOINTS = [
     { x: 3245, z: 3235, r: 10 },  // NE of Lumbridge, open ground
     { x: 3262, z: 3253, r: 10 },  // junction west of cow fence (proven)
-    { x: 3252, z: 3280, r: 5 },   // road north between fields
-    { x: 3253, z: 3308, r: 5 },   // farm-belt crossing (gtlaw14's proven gap)
+    { x: 3242, z: 3283, r: 5 },   // road WEST of the potato field
+    { x: 3241, z: 3308, r: 5 },   // crossing at the field's west edge
+                                  // (potatoes span x=3244-3263 on z=3300 —
+                                  // loc-scan evidence, do not cut through)
     { x: 3264, z: 3321, r: 10 },  // road bend NE past the fields
     { x: 3280, z: 3340, r: 10 },  // open ground (proven)
     { x: 3285, z: 3365, r: 10 },  // North (proven)
@@ -76,7 +78,7 @@ const MARCH_WAYPOINTS = [
 // South face of the farm-belt fence: any unit that thinks it is past the
 // crossing but still sits in this box has NOT crossed — send it back to
 // the road approach instead of letting it grind north into the fence.
-const BELT = { x0: 3248, x1: 3280, z1: 3304, backTo: 2 };
+const BELT = { x0: 3244, x1: 3280, z1: 3304, backTo: 2 };
 
 class LawBot {
     private session: LiteSession | null = null;
@@ -388,8 +390,11 @@ class LawBot {
             const inLumbridge = !ramping && px < 3240 && pz > 3150 && pz < 3345;
 
             // Lumbridge-zone escape: prioritize walking east over opening doors
-            // (castle doors lead deeper; east walk escapes the building zone)
-            if (inLumbridge) {
+            // (castle doors lead deeper; east walk escapes the building zone).
+            // Skip when the failure is the SILENT variant — that means walks
+            // are being accepted locally and rejected by the server, so the
+            // east shortcut would just loop; let gates/jitter run instead.
+            if (inLumbridge && !/silent/.test(this.lastFailure)) {
                 const moved = this.walkToward(px, pz, 3255, Math.max(pz, 3240), 'stuck-east');
                 if (moved) {
                     if (this.escapeTries % 8 === 1) {
@@ -459,6 +464,15 @@ class LawBot {
             } else {
                 dx = (1 + (this.tick + this.escapeTries) % 5) * ((this.tick + this.escapeTries) % 2 === 0 ? 1 : -1);
                 dz = (1 + (this.tick * 7 + this.escapeTries) % 5) * ((this.tick >> 1) % 2 === 0 ? 1 : -1);
+            }
+            // Long-stuck diffusion: after 300 motionless ticks the local
+            // geometry has beaten every directed probe — take big random
+            // steps (8-14 tiles) so the unit random-walks out of the pocket.
+            if (this.tick - this.staleSince > 300) {
+                const mag = 8 + (this.tick + this.escapeTries * 3) % 7;
+                const ang = ((this.tick * 13 + this.escapeTries * 29) % 16) * (Math.PI / 8);
+                dx = Math.round(Math.cos(ang) * mag);
+                dz = Math.round(Math.sin(ang) * mag);
             }
             this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'escape-jitter' });
             this.waitTicks = 2;
