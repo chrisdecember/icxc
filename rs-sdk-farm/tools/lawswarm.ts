@@ -5,7 +5,7 @@
 //
 // Dark wizards drop 3x law runes at 1/128 and stand in two circles we can
 // reach: south of Varrock (3225,3374) and the Lumbridge zone (3220,3220).
-// Each bot ramps on cows until its melee holds, then works its assigned
+// Each bot ramps on Lumbridge men until its melee holds, then works its assigned
 // circle: attack, loot law runes (and adjacent coins), rest when low.
 // Per-bot XP-rate telemetry reveals spawn saturation per site — the data
 // that decides how far past 16 units the swarm scales.
@@ -21,10 +21,14 @@ import type { BotAction, BotWorldState } from '#/bot/types.js';
 import type { Client } from '#/client/Client.js';
 import type { LiteClient } from './LiteClient.js';
 
-const COWS = { x: 3253, z: 3290 };
+// RAMP on Lumbridge men (open field, no fences — the cow pen gate was
+// a 2-hour blocker: gate already open but units closing it, east fence
+// blocking west approach, geometry too complex for blind navigation).
+const RAMP = { x: 3236, z: 3240 };
+// Lumbridge-zone removed: no dark wizards spawn there (only men/rats).
+// All graduated units converge on the Varrock circle.
 const SITES = [
     { name: 'varrock-circle', x: 3225, z: 3374 },
-    { name: 'lumbridge-zone', x: 3220, z: 3222 },
 ];
 // All laws flow through the vault: units drop their stacks here and the
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
@@ -42,7 +46,7 @@ const ICE_ENABLED = process.env.ICE === '1';
 const ICE_ENTRANCE = { x: 3008, z: 3150 };
 const ICE_SITE = { name: 'asgarnian-ice-dungeon', x: 3044, z: 9581 };
 const SWORDSHOP = { x: 3203, z: 3397 };
-const RAMP_UNTIL = 16; // avg(atk,str,def,hp) before leaving the cows
+const RAMP_UNTIL = 16; // avg(atk,str,def,hp) before graduating to dark wizards
 const ATTACK_RETRY_TICKS = 8;
 const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
@@ -238,39 +242,61 @@ class LawBot {
             return;
         }
 
-        // Stuck-escape: the post-tutorial teleport dropped all 16 units on
-        // ONE tile (3235,3236) where findPathToTile rejects every route —
-        // either an enclosed spot (closed door) or stale collision after the
-        // rebuild. Odd tries open any door/gate in reach; even tries jitter
-        // to an adjacent tile to give the pathfinder a fresh origin.
+        const ramping = this.cl < RAMP_UNTIL;
+        const iceTier = ICE_ENABLED && this.cl >= 45;
+        const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
+
+        // Opportunistic attack: check for attackable targets BEFORE stuck-
+        // escape — a unit jittering near men can still train combat.
+        const prey = ramping ? /^man$|^woman$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
+        if (this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
+            const nearbyPrey = state.nearbyNpcs
+                .filter(n => prey.test(n.name) && n.reachable !== false)
+                .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
+                .sort((a, b) => a.distance - b.distance);
+            const opportunistic = nearbyPrey[0];
+            if (opportunistic) {
+                const opt = opportunistic.optionsWithIndex.find(o => /attack/i.test(o.text))!;
+                this.exec({ type: 'interactNpc', npcIndex: opportunistic.index, optionIndex: opt.opIndex, reason: 'attack' });
+                this.lastAttackTick = this.tick;
+                this.lastFailure = '';
+                this.escapeTries = 0;
+                return;
+            }
+        }
+
+        // Stuck-escape: open closed doors/gates if reachable, otherwise jitter.
         if (/client_rejected/.test(this.lastFailure)) {
             this.escapeTries++;
-            if (this.escapeTries === 1) {
-                const locs = (state.nearbyLocs ?? []).slice(0, 10)
-                    .map(l => `${l.name}(${l.x},${l.z})`).join(' ');
+            if (this.escapeTries > 30) {
+                this.lastFailure = '';
+                this.escapeTries = 0;
+            }
+            if (this.escapeTries % 12 === 1) {
+                const locs = (state.nearbyLocs ?? []).slice(0, 8)
+                    .map(l => `${l.name}(${l.x},${l.z})${l.reachable === true ? '✓' : ''}[${l.optionsWithIndex.map(o => o.text).join(',')}]`).join(' ');
                 console.log(`[${this.name}] STUCK-ESCAPE at (${px},${pz}); locs: ${locs || 'none'}`);
             }
-            const door = (state.nearbyLocs ?? []).find(l =>
+
+            const closedGates = (state.nearbyLocs ?? []).filter(l =>
                 /door|gate/i.test(l.name) &&
-                l.optionsWithIndex.some(o => /open/i.test(o.text)));
-            if (door && this.escapeTries % 2 === 1) {
-                const opt = door.optionsWithIndex.find(o => /open/i.test(o.text))!;
-                this.exec({ type: 'interactLoc', x: door.x, z: door.z, locId: door.id, optionIndex: opt.opIndex, reason: 'escape-door' });
-            } else {
-                // Wide random jitter (±1..5): units walk the fence contour
-                // until a gate falls inside the 15-tile loc scan.
-                const dx = (1 + (this.tick + this.escapeTries) % 5) * ((this.tick + this.escapeTries) % 2 === 0 ? 1 : -1);
-                const dz = (1 + (this.tick * 7 + this.escapeTries) % 5) * ((this.tick >> 1) % 2 === 0 ? 1 : -1);
-                this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'escape-jitter' });
+                l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
+            const reachableClosed = closedGates.find(g => g.reachable === true);
+            if (reachableClosed) {
+                const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
+                this.exec({ type: 'interactLoc', x: reachableClosed.x, z: reachableClosed.z, locId: reachableClosed.id, optionIndex: opt.opIndex, reason: 'gate-open' });
+                console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z})`);
+                this.waitTicks = 3;
+                return;
             }
+
+            const dx = (1 + (this.tick + this.escapeTries) % 5) * ((this.tick + this.escapeTries) % 2 === 0 ? 1 : -1);
+            const dz = (1 + (this.tick * 7 + this.escapeTries) % 5) * ((this.tick >> 1) % 2 === 0 ? 1 : -1);
+            this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'escape-jitter' });
             this.waitTicks = 2;
             return;
         }
         this.escapeTries = 0;
-
-        const ramping = this.cl < RAMP_UNTIL;
-        const iceTier = ICE_ENABLED && this.cl >= 45;
-        const anchor = ramping ? COWS : iceTier ? ICE_SITE : this.site;
 
         // Rest when low: step off the circle and let regen work.
         if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4)) {
@@ -352,12 +378,6 @@ class LawBot {
 
         if (this.tick - this.lastAttackTick < ATTACK_RETRY_TICKS) return;
 
-        // Navigate by the HERD, not the map pin. The cow-pen anchor tile is
-        // fence-blocked from outside — units orbited the pen for an hour
-        // failing walkTo(anchor). Any visible prey is ground truth: reachable
-        // -> attack; visible-but-fenced -> stalk toward it (the jitter+door
-        // escape walks the fence line until a gate enters scan range).
-        const prey = ramping ? /^cow$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
         const preyAll = state.nearbyNpcs
             .filter(n => prey.test(n.name))
             .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
@@ -375,6 +395,10 @@ class LawBot {
             return;
         }
         if (!target) {
+            if (this.tick % 50 === 0) {
+                const npcs = state.nearbyNpcs.slice(0, 6).map(n => `${n.name}(${n.distance}t)`).join(', ');
+                console.log(`[${this.name}] NO-TARGET at (${px},${pz}) prey=${prey} npcs=[${npcs || 'none'}]`);
+            }
             this.waitTicks = 6;
             return;
         }

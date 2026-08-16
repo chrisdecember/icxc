@@ -1,12 +1,10 @@
 import { runScript } from "../../sdk/runner";
 
-// BLADE — law-rune combat farmer. Wizards drop law runes (1/128) and a
-// spread of other runes; a pair of blades compounding kills is the
-// fleet's sustainable law source until runecrafting is proven. Ramp:
-// cows until combat ~20, then the WIZARDS' TOWER south of Draynor.
-// (3148,3200) was the TUTOR ROW — a Talk-to-only "Wizard" (cl=0, no
-// Attack option) that both blades swung at for an hour, every failure
-// eaten by the catch. Probe proved it. Tower wizards are attackable.
+// BLADE — law-rune combat farmer. Dark wizards drop 3x law runes at
+// 1/128 (the fleet's primary law source). Pipeline: men until cl>=25,
+// then dark wizards at the Varrock south circle (3225,3374). Laws
+// banked at Varrock East. Ramp target changed from cows to Lumbridge
+// men (open field, no fences — cow pen gate was a blocker).
 
 await runScript(
   async (ctx) => {
@@ -14,14 +12,15 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    const COW_FIELD = { x: 3253, z: 3290 };
-    const COW_GATE = { x: 3253, z: 3266 };
-    const WIZARDS = { x: 3109, z: 3161 }; // Wizards' Tower ground floor
-    const DRAYNOR_BANK = { x: 3092, z: 3243 };
+    const RAMP_AREA = { x: 3236, z: 3240 };
+    const DARK_WIZARDS = { x: 3225, z: 3374 };
+    const VARROCK_BANK = { x: 3253, z: 3420 };
+    const RAMP_THRESHOLD = 25;
 
     let kills = 0;
     let combatStyle = 0;
     let lawsBanked = 0;
+    let lastHp = -1;
 
     async function isAlive() {
       const state = sdk.getState();
@@ -31,7 +30,7 @@ await runScript(
 
     function rotateStyle() {
       if (kills % 5 === 0) {
-        const CYCLE = [0, 1, 3, 2]; // all four styles, Defence included
+        const CYCLE = [0, 1, 3, 2];
         const next = CYCLE[Math.floor(kills / 5) % CYCLE.length];
         if (next !== combatStyle) {
           combatStyle = next;
@@ -87,7 +86,7 @@ await runScript(
       const laws = sdk.countInventoryItems(/law rune/i);
       if (laws < 5 && sdk.getInventory().length < 24) return;
       console.log(`[BLADE] Banking loot (${laws} laws on hand)`);
-      await bot.walkTo(DRAYNOR_BANK.x, DRAYNOR_BANK.z);
+      await bot.walkTo(VARROCK_BANK.x, VARROCK_BANK.z);
       try {
         await bot.openBank();
         await bot.depositItem(/law rune/i, -1);
@@ -97,7 +96,7 @@ await runScript(
         lawsBanked += laws;
         console.log(`[BLADE] LAW-VAULT total banked: ${lawsBanked}`);
       } catch (_) {}
-      await bot.walkTo(WIZARDS.x, WIZARDS.z);
+      await bot.walkTo(DARK_WIZARDS.x, DARK_WIZARDS.z);
     }
 
     // ═══════════════════════════════════════════════════════
@@ -112,6 +111,17 @@ await runScript(
     await equipGear();
 
     while (true) {
+      const st = sdk.getState()?.player;
+      const hp = st?.hp ?? 0;
+      const maxHp = st?.maxHp ?? 10;
+
+      // Death detection: HP jumps up significantly = respawn
+      if (lastHp > 0 && hp > 0 && hp - lastHp >= 5) {
+        console.log(`[BLADE] Death detected (hp ${lastHp} -> ${hp}). Recovering.`);
+        await equipGear();
+      }
+      if (hp > 0) lastHp = hp;
+
       if (!(await isAlive())) {
         console.log("[BLADE] Death — recovering");
         await sdk.waitForTicks(5);
@@ -120,18 +130,22 @@ await runScript(
       }
 
       const cl = combatLevelIsh();
-      const onWizards = cl >= 18;
-      const anchor = onWizards ? WIZARDS : COW_FIELD;
-      const prey = onWizards ? /^wizard$/i : /^cow$/i;
+      const onDarkWiz = cl >= RAMP_THRESHOLD;
+      const anchor = onDarkWiz ? DARK_WIZARDS : RAMP_AREA;
+      const prey = onDarkWiz ? /^dark wizard$/i : /^man$|^woman$/i;
 
-      const st = sdk.getState()?.player;
+      // Status log every 100 kills
+      if (kills > 0 && kills % 100 === 0) {
+        console.log(`[BLADE] STATUS cl=${cl} kills=${kills} laws-banked=${lawsBanked} at=${onDarkWiz ? 'dark-wizards' : 'ramp-men'}`);
+      }
+
       if (
         st &&
         Math.abs(st.worldX - anchor.x) + Math.abs(st.worldZ - anchor.z) > 25
       ) {
-        if (!onWizards) await bot.walkTo(COW_GATE.x, COW_GATE.z);
         await bot.walkTo(anchor.x, anchor.z);
-        if (onWizards) console.log("[BLADE] On station at the wizard spawn");
+        if (onDarkWiz) console.log("[BLADE] On station at dark wizard circle");
+        else console.log(`[BLADE] Heading to ramp area (cl=${cl})`);
       }
 
       const target = sdk.findNearbyNpc(prey, { withOption: /attack/i });
@@ -140,12 +154,15 @@ await runScript(
         await sdk.waitForTicks(4);
         kills++;
         rotateStyle();
+        if (kills % 20 === 0) {
+          console.log(`[BLADE] ${kills} kills, cl=${cl}, hp=${hp}/${maxHp}, target=${onDarkWiz ? 'dark-wizards' : 'men'}`);
+        }
       } else {
         await sdk.waitForTicks(3);
       }
 
       await lootAndBury();
-      if (onWizards) await bankLaws();
+      if (onDarkWiz) await bankLaws();
       await restIfLow(anchor);
 
       if (sdk.getInventory().length >= 26) {
