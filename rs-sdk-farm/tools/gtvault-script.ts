@@ -17,7 +17,10 @@ await runScript(
     // (~8 tiles, within 15-tile scan), well outside wizard aggro.
     const WAIT = { x: 3229, z: 3332 };
     const BANK = { x: 3185, z: 3436 };
-    const BANK_AT = 30;
+    // Bank at 10: proves the deposit loop quickly and keeps the exposed
+    // inventory stack small (was 30 — never reached, so the pipeline's
+    // final leg had never actually run).
+    const BANK_AT = 10;
     const ADS = [
       "BUYING LAW RUNES — paying coins. trade me",
       "law runes wanted. instant coin payment at the wizard circle",
