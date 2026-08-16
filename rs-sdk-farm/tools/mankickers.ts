@@ -36,7 +36,7 @@ const ANCHORS = [
     { name: 'north-gate', x: 3223, z: 3231 },
     { name: 'general-store', x: 3218, z: 3243 },
     { name: 'north-road', x: 3236, z: 3242 },
-    { name: 'bridge-path', x: 3245, z: 3230 },
+    { name: 'east-road', x: 3238, z: 3225 },
 ];
 
 const TAUNTS = [
@@ -233,13 +233,22 @@ class KickBot {
             const closed = (state.nearbyLocs ?? []).filter(l =>
                 /door|gate/i.test(l.name) &&
                 l.reachable === true &&
-                l.optionsWithIndex.some(o => /^open$/i.test(o.text)))
+                l.optionsWithIndex.some(o => /^open$|^pay/i.test(o.text)))
                 .sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))[0];
             if (closed) {
-                const opt = closed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
+                const opt = closed.optionsWithIndex.find(o => /^open$|^pay/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: closed.x, z: closed.z, locId: closed.id, optionIndex: opt.opIndex, reason: 'door-escape' });
                 this.lastFailure = '';
                 this.escapeTries = 0;
+                this.waitTicks = 4;
+                return;
+            }
+            // Far from anchor: walk toward it in steps instead of random jitter.
+            if (toAnchor > 20) {
+                const mag = 8;
+                const adx = this.anchor.x - px, adz = this.anchor.z - pz;
+                const len = Math.hypot(adx, adz) || 1;
+                this.exec({ type: 'walkTo', x: Math.round(px + adx / len * mag), z: Math.round(pz + adz / len * mag), running: true, reason: 'deep-escape' });
                 this.waitTicks = 4;
                 return;
             }
