@@ -367,11 +367,22 @@ class LawBot {
                 }
             }
 
+            const atTollGate = px >= 3264 && px <= 3272 && pz >= 3224 && pz <= 3232;
+            if (atTollGate) {
+                this.exec({ type: 'walkTo', x: 3250, z: 3240, running: true, reason: 'tollgate-escape' });
+                this.lastFailure = '';
+                this.escapeTries = 0;
+                this.marchWp = -1;
+                this.waitTicks = 3;
+                return;
+            }
+
             const closedGates = (state.nearbyLocs ?? []).filter(l =>
                 /door|gate/i.test(l.name) &&
                 l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
             const reachableClosed = closedGates
                 .filter(g => g.reachable === true)
+                .filter(g => !(g.x >= 3267 && g.x <= 3269 && g.z >= 3226 && g.z <= 3229))
                 .sort((a, b) => {
                     if (inLumbridge) {
                         const aEast = a.x >= px ? 0 : 1;
