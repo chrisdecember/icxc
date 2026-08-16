@@ -554,19 +554,18 @@ class LawBot {
         }
         this.escapeTries = 0;
 
-        // Rest when low: step off the circle and let regen work. 55% cutoff —
-        // at 40% a wizard pair finishes a unit before it clears aggro range
-        // (three 0-law circle deaths proved it). Rest spot pushed to +20/-14
-        // so regen happens outside wizard wander range.
-        // Rest ON the proven east corridor (z=anchor.z), 30 tiles out — the
-        // old spot (+20,-14) sat inside the tree cluster SE of the circle,
-        // trapping recovered units 34 tiles from anchor with trees between.
-        const restX = anchor.x + 30, restZ = anchor.z;
+        // Rest spot: 18 tiles east of anchor — outside wizard aggro (~14t)
+        // but close enough that the return walk is trivial. The old +30 spot
+        // stranded bots out of NPC-visibility range and triggered the
+        // silent-reject detector (30-tick recovery rest looked like being
+        // stuck), sending units into jitter-escape instead of walking back.
+        const restX = anchor.x + 18, restZ = anchor.z;
         if (this.recovering) {
             if (Math.hypot(px - restX, pz - restZ) > 4) {
                 this.walkToward(px, pz, restX, restZ, 'rest');
                 this.waitTicks = 6;
             } else {
+                this.staleSince = this.tick;
                 this.waitTicks = 30;
             }
             return;
