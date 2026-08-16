@@ -14,6 +14,7 @@
 // them. Junk is dropped on sight.
 
 import './dom-shim.js';
+import { appendFileSync } from 'node:fs';
 import { startSession, type LiteSession, type SessionEnd } from './session.js';
 import { BotStateCollector } from '#/bot/StateCollector.js';
 import { ActionExecutor } from '#/bot/ActionExecutor.js';
@@ -43,6 +44,7 @@ const VAULT_AT = 8; // laws held before a vault run
 // walk to the entrance, interact the ladder to go underground, then path
 // to the warriors. Until that nav exists, ice tier stays off.
 const ICE_ENABLED = process.env.ICE === '1';
+const TRACE_FILE = new URL('../../../../logs/lawtrace.jsonl', import.meta.url).pathname;
 const ICE_ENTRANCE = { x: 3008, z: 3150 };
 const ICE_SITE = { name: 'asgarnian-ice-dungeon', x: 3044, z: 9581 };
 const SWORDSHOP = { x: 3203, z: 3397 };
@@ -52,15 +54,21 @@ const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
 const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|newcomer|bread/i;
 
-// Waypoint chain: tested-walkable tiles from Lumbridge to Varrock circle.
-// Routes EAST of farm fences (z=3260-3310) and picnic bench area (z=3330-3350)
-// to avoid the obstacles that trap BFS-limited lite clients.
+// Waypoint chain: the Lumbridge->Varrock ROAD, reconstructed from the two
+// units that actually completed the trip (gtlaw14 crossed the farm belt at
+// x~3250 z3300-3320 twice; gtlaw04 at x~3265 z3303). Short road-aligned
+// hops keep BFS bearings on walkable ground instead of aiming diagonally
+// across fenced fields — the diagonal is what created the (3262-3265,
+// 3277-3298) dead pocket.
 const MARCH_WAYPOINTS = [
     { x: 3245, z: 3235 },  // NE of Lumbridge, open ground
-    { x: 3265, z: 3255 },  // East (proven reachable, west of cow fence)
-    { x: 3280, z: 3340 },  // North-east past all farm obstacles (open ground)
-    { x: 3285, z: 3365 },  // North
-    { x: 3280, z: 3380 },  // North past barriers
+    { x: 3262, z: 3253 },  // junction west of cow fence (proven)
+    { x: 3252, z: 3280 },  // road north between fields
+    { x: 3253, z: 3305 },  // farm-belt crossing (gtlaw14's proven gap)
+    { x: 3264, z: 3321 },  // road bend NE past the fields
+    { x: 3280, z: 3340 },  // open ground (proven)
+    { x: 3285, z: 3365 },  // North (proven)
+    { x: 3280, z: 3380 },  // North past barriers (proven)
     { x: 3235, z: 3374 },  // West approach to circle
 ];
 
@@ -270,6 +278,13 @@ class LawBot {
         this.px = px; this.pz = pz;
         if (px !== this.staleX || pz !== this.staleZ) {
             this.staleX = px; this.staleZ = pz; this.staleSince = this.tick;
+            // Breadcrumb tracer: every successful traversal becomes route data.
+            // A completed run's trace gets baked into MARCH_WAYPOINTS.
+            if (this.tick % 5 === 0) {
+                try {
+                    appendFileSync(TRACE_FILE, JSON.stringify({ n: this.name, t: this.tick, x: px, z: pz, wp: this.marchWp }) + '\n');
+                } catch { /* tracing is best-effort */ }
+            }
         }
 
         // Tutorial Island (x<3170, z<3145): the lite path never ported
@@ -345,7 +360,7 @@ class LawBot {
                 this.lastFailure = '';
                 this.escapeTries = 0;
             }
-            if (this.escapeTries % 12 === 1) {
+            if (this.escapeTries % 30 === 1) {
                 const locs = (state.nearbyLocs ?? []).slice(0, 8)
                     .map(l => `${l.name}(${l.x},${l.z})${l.reachable === true ? '✓' : ''}[${l.optionsWithIndex.map(o => o.text).join(',')}]`).join(' ');
                 console.log(`[${this.name}] STUCK-ESCAPE at (${px},${pz}); locs: ${locs || 'none'}`);
@@ -534,9 +549,15 @@ class LawBot {
             // Lumbridge-escape: bots trapped in buildings/cabbage (west of x=3240,
             // south of z=3260) force-walk east before following waypoints.
             if (px < 3240 && pz > 3150 && pz < 3345) {
-                const eastTarget = { x: 3255, z: Math.max(pz, 3240) };
+                // Fred's farm / cabbage patch (west of x=3228, north of z=3265)
+                // is fenced on its east side — the only exit is SOUTH along the
+                // sheep pen back to the road junction, then east as normal.
+                const inCabbage = px < 3228 && pz > 3265;
+                const eastTarget = inCabbage
+                    ? { x: 3216, z: 3247 }
+                    : { x: 3255, z: Math.max(pz, 3240) };
                 if (this.tick % 60 === 0) {
-                    console.log(`[${this.name}] LUMBRIDGE-ESCAPE (${px},${pz}) -> east`);
+                    console.log(`[${this.name}] LUMBRIDGE-ESCAPE (${px},${pz}) -> ${inCabbage ? 'south (cabbage exit)' : 'east'}`);
                 }
                 this.walkToward(px, pz, eastTarget.x, eastTarget.z, 'lumbridge-escape');
                 this.marchWp = -1;
@@ -569,31 +590,40 @@ class LawBot {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length} stall=${wpStall}`);
             }
 
-            if (wpStall > 200) {
-                if (px >= wp.x - 5 && this.marchWp < MARCH_WAYPOINTS.length) {
+            if (wpStall > 120 && this.marchWp < MARCH_WAYPOINTS.length) {
+                // Direction-agnostic advance: if the NEXT waypoint is about as
+                // close as the current one, we're past the current one — stop
+                // fighting geometry we've already cleared.
+                const nxt = this.marchWp + 1 >= MARCH_WAYPOINTS.length
+                    ? anchor : MARCH_WAYPOINTS[this.marchWp + 1];
+                if (Math.hypot(px - nxt.x, pz - nxt.z) < distToWp + 4) {
                     this.marchWp++;
                     this.marchWpSince = this.tick;
-                    console.log(`[${this.name}] MARCH-ADVANCE (east of wp) at (${px},${pz}) -> wp=${this.marchWp}`);
-                } else if (wpStall > 400 && wpStall % 6 < 3) {
-                    const nz = Math.min(pz + 12, wp.z);
-                    this.exec({ type: 'walkTo', x: px + 3, z: nz, running: true, reason: 'march-force-north' });
-                    this.lastFailure = '';
-                    if (wpStall % 60 === 1) {
-                        console.log(`[${this.name}] MARCH-FORCE-NORTH stall=${wpStall} at (${px},${pz}) -> (${px + 3},${nz})`);
-                    }
-                    this.waitTicks = 3;
-                    return;
-                } else {
-                    const ex = Math.min(px + 15, 3290);
-                    const ez = Math.min(pz + 8, wp.z);
-                    this.exec({ type: 'walkTo', x: ex, z: ez, running: true, reason: 'march-force-east' });
-                    this.lastFailure = '';
-                    if (wpStall % 60 === 1) {
-                        console.log(`[${this.name}] MARCH-FORCE-EAST stall=${wpStall} at (${px},${pz}) -> (${ex},${ez})`);
-                    }
-                    this.waitTicks = 3;
-                    return;
+                    console.log(`[${this.name}] MARCH-ADVANCE (past wp) at (${px},${pz}) -> wp=${this.marchWp}`);
                 }
+            }
+            if (wpStall > 240) {
+                // Force-toward-WP: offset the target around the waypoint's
+                // bearing instead of shoving blind east (blind east is what
+                // built the dead pocket at x=3262-3265). Cycle W/direct/E/N
+                // offsets so successive windows probe different approaches.
+                const OFFSETS = [
+                    { dx: 0, dz: 0 }, { dx: -8, dz: 0 }, { dx: 8, dz: 0 }, { dx: 0, dz: 8 },
+                ];
+                const o = OFFSETS[Math.floor(wpStall / 40) % OFFSETS.length];
+                const fx = wp.x + o.dx, fz = wp.z + o.dz;
+                // Step at most ~12 tiles from here toward the offset target.
+                const fd = Math.hypot(fx - px, fz - pz) || 1;
+                const step = Math.min(12, fd);
+                const tx = Math.round(px + ((fx - px) / fd) * step);
+                const tz = Math.round(pz + ((fz - pz) / fd) * step);
+                this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason: 'march-force' });
+                this.lastFailure = '';
+                if (wpStall % 60 === 1) {
+                    console.log(`[${this.name}] MARCH-FORCE stall=${wpStall} at (${px},${pz}) -> (${tx},${tz}) [wp${this.marchWp}+(${o.dx},${o.dz})]`);
+                }
+                this.waitTicks = 3;
+                return;
             }
 
             const wpIdx2 = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
