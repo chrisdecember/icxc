@@ -22,6 +22,9 @@ await runScript(
 
     let totalGP = 0;
     let inAlKharid = false;
+    let guardFallback = false;
+    let guardXpMark = -1;
+    let guardAttempts = 0;
 
     async function isAlive() {
       const state = sdk.getState();
@@ -166,8 +169,23 @@ await runScript(
       }
 
       if (inAlKharid) {
+        // Evidence check: if 30 straight attempts yield zero Thieving XP,
+        // the target is a dud here — fall back to men permanently.
+        if (!guardFallback) {
+          const xpNow = sdk.getSkillXp("Thieving") ?? 0;
+          if (guardXpMark === -1) {
+            guardXpMark = xpNow;
+            guardAttempts = 0;
+          } else if (xpNow > guardXpMark) {
+            guardXpMark = xpNow;
+            guardAttempts = 0;
+          } else if (++guardAttempts >= 30) {
+            console.log("[FINGERS] Guards yield nothing — falling back to men");
+            guardFallback = true;
+          }
+        }
         try {
-          await bot.pickpocketNpc(WORK.npc);
+          await bot.pickpocketNpc(guardFallback ? /^man$/i : WORK.npc);
         } catch (_) {}
         await bot.dismissBlockingUI();
         await eatIfLow(0.4);
