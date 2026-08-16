@@ -111,6 +111,7 @@ class LawBot {
     private marchWpSince = 0;
     private forceCount = 0;
     private lastGateTick = -99;
+    private lastStyleTick = -99;
 
     laws = 0;
     xpGained = 0;
@@ -333,6 +334,43 @@ class LawBot {
         // A unit that is traveling but hasn't moved a tile in 30 ticks is
         // stuck no matter what the executor reported — synthesize a failure
         // so the gate-open/escape machinery engages.
+        // Style doctrine (user directive): fight DEFENSIVE until Defence 50 —
+        // bank def levels while tanking wizard gangs — then go bare-knuckle
+        // kick/punch like the mankickers.
+        const cs = (state as any).combatStyle;
+        if (cs?.styles?.length && this.tick - this.lastStyleTick >= 10) {
+            this.lastStyleTick = this.tick;
+            if (def < 50) {
+                const want = cs.styles.find((s: any) => /defensive/i.test(s.type)) ??
+                    cs.styles.find((s: any) => /block/i.test(s.name));
+                if (want && cs.currentStyle !== want.index) {
+                    this.exec({ type: 'setCombatStyle', style: want.index, reason: 'doctrine-defensive' });
+                    console.log(`[${this.name}] DOCTRINE style -> ${want.name} (def ${def}/50)`);
+                    this.waitTicks = 1;
+                    return;
+                }
+            } else {
+                // Kick/punch era: shed the weapon, then alternate kick-heavy.
+                const weapon = ((state as any).equipment ?? []).find((e: any) =>
+                    /sword|scimitar|dagger|mace|axe/i.test(e.name));
+                if (weapon) {
+                    this.exec({ type: 'useEquipmentItem', slot: weapon.slot, optionIndex: 1, reason: 'doctrine-fists' });
+                    console.log(`[${this.name}] DOCTRINE unequip ${weapon.name} — fists from here`);
+                    this.waitTicks = 2;
+                    return;
+                }
+                const punchTime = this.tick % 150 < 25;
+                const want = punchTime
+                    ? cs.styles.find((s: any) => /punch/i.test(s.name))
+                    : cs.styles.find((s: any) => /kick/i.test(s.name));
+                if (want && cs.currentStyle !== want.index) {
+                    this.exec({ type: 'setCombatStyle', style: want.index, reason: 'doctrine-kickpunch' });
+                    this.waitTicks = 1;
+                    return;
+                }
+            }
+        }
+
         const resting = maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4);
         const traveling = Math.hypot(px - anchor.x, pz - anchor.z) > 14;
         if (traveling && !resting && !this.lastFailure && this.tick - this.staleSince > 30 && this.staleSince > 0) {
