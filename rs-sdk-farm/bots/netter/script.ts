@@ -59,11 +59,15 @@ await runScript(
     // failure previously left it netless at the spot with an empty pack).
     async function ensureNet() {
       let tries = 0;
-      while (!sdk.findInventoryItem(/fishing net/i) && tries < 3) {
+      while (!sdk.findInventoryItem(/fishing net/i) && tries < 8) {
         tries++;
         console.log(`[NETTER] No net — rebuy attempt ${tries} at Port Sarim`);
+        // Gerrant's is the only reachable net source (stock 5) and the agent
+        // swarm drains it. Earn Thieving XP at Lumbridge while it restocks —
+        // ~4 minutes of pickpocketing between attempts, never a dead loop.
         await bot.walkTo(3232, 3218);
-        for (let i = 0; i < 60 && sdk.countInventoryItems(/coins/i) < 30; i++) {
+        for (let i = 0; i < (tries === 1 ? 60 : 130); i++) {
+          if (sdk.countInventoryItems(/coins/i) >= 30 && tries === 1) break;
           try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
           await bot.dismissBlockingUI();
         }
