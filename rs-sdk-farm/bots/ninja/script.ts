@@ -1,16 +1,15 @@
 import { runScript } from "../../sdk/runner";
 
-// GTNINJA — drop-pile interceptor. nick's fleet runs the collector
-// pattern: worker bots pickpocket and DROP their coins in place for a
-// collector to sweep. Ground items are fair game — so the ninja shadows
-// a suspected worker and hoovers its hand-off piles before the collector
-// arrives. Pure intel + interception PoC; nothing here touches Jagex or
-// breaks a rule, it just gets to the loot first.
+// GTNINJA v2 — PILE HOOVER. The lesson from the hiscores: you can't ID
+// collector bots by name (bkoaza is rank-1 thieving, faster than nick's
+// whole fleet, and matches no naming pattern). So don't try. The collector
+// pattern's signature isn't the NAME — it's the DROP PILES. Worker bots
+// pickpocket and drop coins in place for a collector to sweep; we camp the
+// pickpocket clusters and hoover every coin/rune/valuable pile that isn't
+// ours, getting there before their collector. Ground items are fair game.
 //
-// Target ID: nick's bots carry auto-generated handles — 8-10 chars, all
-// lowercase alphanumeric, with digits mixed in (e.g. "9mvy2gmh1"). Real
-// players read as words with capitals ("Thanatos"). The heuristic is
-// logged with every lock so we can audit false positives.
+// The bot-handle detection stays, but only as INTEL (logging which fleets
+// work which cluster) — never as a gate on what we grab.
 
 await runScript(
   async (ctx) => {
@@ -18,36 +17,20 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    // Pickpocket hubs where collector fleets cluster (from scout intel).
-    // The actual worker clusters (men pickpocket spots), from scout intel —
-    // not plaza centers where the drops don't happen.
-    const HUNTING_GROUNDS = [
+    // Drop zones: where collector fleets pickpocket, so where piles appear.
+    const DROP_ZONES = [
       { name: "lumbridge-men", x: 3231, z: 3218 },
       { name: "barbarian-village", x: 3082, z: 3420 },
       { name: "edgeville", x: 3088, z: 3242 },
-      { name: "varrock-square", x: 3213, z: 3423 },
       { name: "draynor", x: 3092, z: 3243 },
+      { name: "varrock-square", x: 3213, z: 3423 },
     ];
+    const LOOT = /coins|rune|ore|bar|essence|gem|sapphire|emerald|ruby|diamond/i;
+    const BANK = { x: 3185, z: 3436 }; // Varrock West
 
     let grabbed = 0;
     let gpGrabbed = 0;
-    let currentMark: string | null = null;
-
-    // nick's confirmed fleet roster from the hiscores — literal names, not a
-    // guess. These are PRIORITY marks (their collector runs the coin pipeline).
-    const NICK_ROSTER = /^nicksthief\d*$/i;
-
-    function markPriority(name: string): number {
-      if (!name || /^gt/i.test(name)) return 0; // never shadow our own bots
-      if (NICK_ROSTER.test(name)) return 3; // nick's fleet — top priority
-      // Other collector fleets: 8-12 alphanumeric with 2+ digits (case-ins).
-      if (/^[a-z0-9]{8,12}$/i.test(name) && (name.match(/[0-9]/g) ?? []).length >= 2) {
-        return 2;
-      }
-      // Bot-ish single-digit handles (nicksthief-style variants elsewhere).
-      if (/bot|thief|rune|coin|swarm/i.test(name) && /\d/.test(name)) return 1;
-      return 0;
-    }
+    let zoneIdx = 0;
 
     async function isAlive() {
       const state = sdk.getState();
@@ -55,91 +38,85 @@ await runScript(
       return state.player.hp > 0;
     }
 
-    async function grabPilesNear(cx: number, cz: number) {
-      // Coins first (the hand-off), then anything else valuable dropped.
-      for (let i = 0; i < 4; i++) {
-        const items = sdk.getGroundItems();
-        const pile = items
-          .filter((g: any) => /coins|rune|ore|bar|law/i.test(g.name))
-          .filter((g: any) => Math.abs(g.x - cx) + Math.abs(g.z - cz) <= 4)
-          .sort((a: any, b: any) => Math.abs(a.x - cx) - Math.abs(b.x - cx))[0];
-        if (!pile) break;
+    // Intel only: log which fleets are working this zone. Never gates grabs.
+    function logFleetIntel(zone: string) {
+      const players = (sdk.getNearbyPlayers() as any[])
+        .filter((p) => !/^gt/i.test(p.name));
+      if (players.length === 0) return;
+      const suspects = players.filter(
+        (p) => /^nicksthief/i.test(p.name) || /\d/.test(p.name) || p.combatLevel <= 5
+      );
+      if (suspects.length > 0) {
+        console.log(
+          `[NINJA] FLEET-INTEL ${zone}: ${suspects.length} suspects [${suspects
+            .slice(0, 6)
+            .map((p) => p.name)
+            .join(",")}]`
+        );
+      }
+    }
+
+    async function hooverZone(zone: { name: string; x: number; z: number }, ticks: number) {
+      let dry = 0;
+      for (let t = 0; t < ticks; t++) {
+        if (!(await isAlive())) return;
+        // Any valuable pile not sitting under one of our own bots.
+        const piles = (sdk.getGroundItems() as any[])
+          .filter((g) => LOOT.test(g.name))
+          .sort((a, b) => {
+            const st = sdk.getState()?.player;
+            if (!st) return 0;
+            return (
+              Math.abs(a.x - st.worldX) + Math.abs(a.z - st.worldZ) -
+              (Math.abs(b.x - st.worldX) + Math.abs(b.z - st.worldZ))
+            );
+          });
+        const pile = piles[0];
+        if (!pile) {
+          if (++dry > 6) return; // zone quiet — rotate
+          // Drift around the cluster to catch piles at its edges.
+          await bot.walkTo(zone.x, zone.z);
+          await sdk.waitForTicks(2);
+          continue;
+        }
+        dry = 0;
         const before = sdk.countInventoryItems(/coins/i);
         try { await bot.pickupItem(pile); } catch (_) {}
         const after = sdk.countInventoryItems(/coins/i);
-        grabbed++;
-        gpGrabbed += Math.max(0, after - before);
-        console.log(
-          `[NINJA] INTERCEPT ${pile.name} @ (${pile.x},${pile.z}) — ${grabbed} grabs, ${gpGrabbed}gp lifted from marks`
-        );
-        await sdk.waitForTicks(1);
+        if (after > before || pile.name && !/coins/i.test(pile.name)) {
+          grabbed++;
+          gpGrabbed += Math.max(0, after - before);
+          console.log(
+            `[NINJA] HOOVER ${pile.name} @ (${pile.x},${pile.z}) — ${grabbed} piles, ${gpGrabbed}gp intercepted`
+          );
+        }
+        // Bank when the pack fills so a ninja death doesn't gift it back.
+        if (sdk.getInventory().length >= 26) {
+          await bot.walkTo(BANK.x, BANK.z);
+          try {
+            await bot.openBank();
+            await bot.depositItem(/coins/i, -1);
+            await bot.depositItem(/rune|ore|bar|gem/i, -1);
+            await bot.closeBank();
+          } catch (_) {}
+          await bot.walkTo(zone.x, zone.z);
+        }
       }
-    }
-
-    function pickMark(): { name: string; x: number; z: number; index: number } | null {
-      const players = sdk.getNearbyPlayers() as any[];
-      const marks = players
-        .map((p) => ({ p, pri: markPriority(p.name) }))
-        .filter((m) => m.pri > 0);
-      if (marks.length === 0) return null;
-      // Stick with the current mark if still in view.
-      if (currentMark) {
-        const still = marks.find((m) => m.p.name === currentMark);
-        if (still) return still.p;
-      }
-      // Highest priority (nick's fleet first), then nearest.
-      marks.sort((a, b) => b.pri - a.pri || a.p.distance - b.p.distance);
-      return marks[0].p;
     }
 
     // ═══════════════════════════════════════════════════════
-    console.log("[NINJA] Shadow protocol active — hunting collector fleets");
-    await sdk.say(""); // stay quiet; ninjas don't advertise
+    console.log("[NINJA] v2: Pile-hoover active — camping the drop zones");
 
-    let groundIdx = 0;
     while (true) {
       if (!(await isAlive())) {
-        console.log("[NINJA] Death — recovering");
         await sdk.waitForTicks(5);
-        currentMark = null;
         continue;
       }
-
-      const mark = pickMark();
-
-      if (!mark) {
-        // No marks here — rotate to the next hunting ground.
-        currentMark = null;
-        const g = HUNTING_GROUNDS[groundIdx++ % HUNTING_GROUNDS.length];
-        console.log(`[NINJA] No marks — repositioning to ${g.name}`);
-        await bot.walkTo(g.x, g.z);
-        await sdk.waitForTicks(6);
-        continue;
-      }
-
-      if (mark.name !== currentMark) {
-        currentMark = mark.name;
-        console.log(
-          `[NINJA] LOCK on "${mark.name}" (bot-handle, cl ${mark.combatLevel ?? "?"}) at (${mark.x},${mark.z})`
-        );
-      }
-
-      // Shadow: close to ~2 tiles, then grab whatever it drops.
-      const st = sdk.getState()?.player;
-      if (st) {
-        const dist = Math.abs(st.worldX - mark.x) + Math.abs(st.worldZ - mark.z);
-        if (dist > 3) {
-          await bot.walkTo(mark.x, mark.z);
-        }
-      }
-      await grabPilesNear(mark.x, mark.z);
-
-      // Bank overflow so a ninja death doesn't gift it all back.
-      if (sdk.getInventory().length >= 26) {
-        try { await bot.dropItem(/bones|cowhide|raw/i, "all"); } catch (_) {}
-      }
-
-      await sdk.waitForTicks(1);
+      const zone = DROP_ZONES[zoneIdx++ % DROP_ZONES.length];
+      await bot.walkTo(zone.x, zone.z);
+      await sdk.waitForTicks(3);
+      logFleetIntel(zone.name);
+      await hooverZone(zone, 60); // work the zone ~60 ticks, then rotate
     }
   },
   { timeout: 86_400_000 }
