@@ -347,12 +347,35 @@ class LawBot {
                 console.log(`[${this.name}] STUCK-ESCAPE at (${px},${pz}); locs: ${locs || 'none'}`);
             }
 
+            const inLumbridge = !ramping && px < 3240 && pz > 3150 && pz < 3345;
+
+            // Lumbridge-zone escape: prioritize walking east over opening doors
+            // (castle doors lead deeper; east walk escapes the building zone)
+            if (inLumbridge) {
+                const moved = this.walkToward(px, pz, 3255, Math.max(pz, 3240), 'stuck-east');
+                if (moved) {
+                    if (this.escapeTries % 8 === 1) {
+                        console.log(`[${this.name}] STUCK-EAST at (${px},${pz}) try=${this.escapeTries}`);
+                    }
+                    this.marchWp = -1;
+                    this.waitTicks = 2;
+                    return;
+                }
+            }
+
             const closedGates = (state.nearbyLocs ?? []).filter(l =>
                 /door|gate/i.test(l.name) &&
                 l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
             const reachableClosed = closedGates
                 .filter(g => g.reachable === true)
-                .sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))[0];
+                .sort((a, b) => {
+                    if (inLumbridge) {
+                        const aEast = a.x >= px ? 0 : 1;
+                        const bEast = b.x >= px ? 0 : 1;
+                        if (aEast !== bEast) return aEast - bEast;
+                    }
+                    return Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz);
+                })[0];
             if (reachableClosed) {
                 const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: reachableClosed.x, z: reachableClosed.z, locId: reachableClosed.id, optionIndex: opt.opIndex, reason: 'gate-open' });
@@ -360,26 +383,15 @@ class LawBot {
                 this.waitTicks = 5;
                 this.lastFailure = '';
                 this.escapeTries = 0;
-                // Walk THROUGH the gate: aim for the tile on the far side (away from bot)
                 const gx = reachableClosed.x + Math.sign(reachableClosed.x - px);
                 const gz = reachableClosed.z + Math.sign(reachableClosed.z - pz);
                 this.exec({ type: 'walkTo', x: gx, z: gz, running: true, reason: 'gate-through' });
                 return;
             }
 
-            // Lumbridge-zone escape: when stuck west of x=3240, force east
-            if (!ramping && px < 3240 && pz > 3150 && pz < 3345) {
-                if (this.escapeTries % 8 === 1) {
-                    console.log(`[${this.name}] STUCK-EAST at (${px},${pz}) try=${this.escapeTries}`);
-                }
-                const moved = this.walkToward(px, pz, 3255, Math.max(pz, 3240), 'stuck-east');
-                if (!moved && this.escapeTries > 15) {
-                    this.lastFailure = '';
-                    this.escapeTries = 0;
-                }
-                this.marchWp = -1;
-                this.waitTicks = 2;
-                return;
+            if (inLumbridge && this.escapeTries > 15) {
+                this.lastFailure = '';
+                this.escapeTries = 0;
             }
 
             // Use waypoint target for escape direction when marching
