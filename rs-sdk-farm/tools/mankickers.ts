@@ -277,15 +277,15 @@ class KickBot {
             return;
         }
 
-        // Stalk a visible-but-unreachable target.
-        if (!target && visible) {
+        const toAnchor = Math.hypot(px - this.anchor.x, pz - this.anchor.z);
+
+        // Stalk a visible-but-unreachable target, but only near the anchor —
+        // chasing beyond leash distance traps bots at gates/walls (mankicker8).
+        if (!target && visible && toAnchor <= 15) {
             this.exec({ type: 'walkTo', x: visible.x, z: visible.z, running: false, reason: 'stalk' });
             this.waitTicks = 3;
             return;
         }
-
-        // No prey in sight: drift back to the patrol anchor, scout-jitter near it.
-        const toAnchor = Math.hypot(px - this.anchor.x, pz - this.anchor.z);
         if (toAnchor > 12) {
             this.exec({ type: 'walkTo', x: this.anchor.x, z: this.anchor.z, running: true, reason: 'patrol-return' });
             this.waitTicks = 4;
