@@ -27,6 +27,8 @@ await runScript(
     ];
 
     let deliveries = 0;
+    let lastPos = { x: 0, z: 0 };
+    let lastNpcs: string[] = [];
 
     async function walkWaypoints(points: { x: number; z: number }[]) {
       for (const p of points) await bot.walkTo(p.x, p.z);
@@ -38,19 +40,16 @@ await runScript(
       return state.player.hp > 0;
     }
 
-    // Scarcity ladder: copper/tin → iron (15) → coal at Al Kharid mine (30).
-    // The Al Kharid mine (3295,3287) sits NORTH of the toll gate — no toll.
-    const AL_KHARID_MINE = { x: 3295, z: 3287 };
-
+    // Scarcity ladder capped at iron: the coal rung (Al Kharid mine) was
+    // measured fatal — scorpions killed the baron 4x at (3301,3285) with
+    // 10 HP and no armor. Iron at SE Varrock is the survivable frontier.
     function currentSite() {
-      const level = sdk.getSkill("Mining")?.level ?? 1;
-      return level >= 30 ? AL_KHARID_MINE : MINE;
+      return MINE;
     }
 
     async function mineOne() {
       const level = sdk.getSkill("Mining")?.level ?? 1;
-      const pattern =
-        level >= 30 ? /coal|iron/i : level >= 15 ? /iron/i : /copper|tin/i;
+      const pattern = level >= 15 ? /iron/i : /copper|tin/i;
       const rock = sdk.findNearbyLoc(pattern, { withOption: /mine/i });
       if (rock) {
         try {
@@ -140,10 +139,19 @@ await runScript(
 
     while (true) {
       if (!(await isAlive())) {
-        console.log("[IRONMN] Death detected — recovering");
+        console.log(
+          `[IRONMN] Death detected — last seen at (${lastPos.x},${lastPos.z}) near [${lastNpcs.join(",")}] — recovering`
+        );
         await sdk.waitForTicks(5);
         await walkWaypoints(WAYPOINTS_TO_MINE);
         continue;
+      }
+      {
+        const st = sdk.getState();
+        if (st?.player) {
+          lastPos = { x: st.player.worldX, z: st.player.worldZ };
+          lastNpcs = [...new Set((st.nearbyNpcs ?? []).map((n: any) => n.name))].slice(0, 6) as string[];
+        }
       }
       if (sdk.getInventory().length >= 27) {
         await unload();
