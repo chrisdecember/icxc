@@ -31,9 +31,16 @@ const SITES = [
 // or bank — the drop-pile pattern is the collector mechanism.)
 const VAULT = { x: 3227, z: 3368 };
 const VAULT_AT = 8; // laws held before a vault run
-// Ice-warrior tier unlocks only after the scout verifies the site.
+// Ice-warrior tier (7/128 laws — premium source). REAL location is the
+// Asgarnian Ice Dungeon, UNDERGROUND at (3044,9581) — reached by the
+// ladder south of Port Sarim (surface entrance ~3008,3150). My earlier
+// (3008,3471) was the Ice Mountain surface (wrong — dwarves, not warriors).
+// Gated behind ICE=1 AND ladder-descent nav, which is a TODO: units must
+// walk to the entrance, interact the ladder to go underground, then path
+// to the warriors. Until that nav exists, ice tier stays off.
 const ICE_ENABLED = process.env.ICE === '1';
-const ICE_SITE = { name: 'ice-mountain', x: 3008, z: 3471 };
+const ICE_ENTRANCE = { x: 3008, z: 3150 };
+const ICE_SITE = { name: 'asgarnian-ice-dungeon', x: 3044, z: 9581 };
 const SWORDSHOP = { x: 3203, z: 3397 };
 const RAMP_UNTIL = 16; // avg(atk,str,def,hp) before leaving the cows
 const ATTACK_RETRY_TICKS = 8;
