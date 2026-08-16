@@ -189,7 +189,15 @@ await runScript(
         );
 
         await walkWaypoints(SAFE_TO_LUMBRIDGE);
-        const delivered = await tryTradeToKing();
+        let delivered = await tryTradeToKing();
+
+        if (!delivered) {
+          // KING lives at the cow field during the combat phase — bring the
+          // food to the war instead of dropping it at an empty courtyard.
+          await bot.walkTo(3253, 3266);
+          await bot.walkTo(3253, 3290);
+          delivered = await tryTradeToKing();
+        }
 
         if (!delivered) {
           // Drop instead of trekking to a bank — keeps the cycle tight
