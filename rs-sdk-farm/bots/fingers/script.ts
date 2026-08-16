@@ -159,7 +159,7 @@ await runScript(
         ? { x: 3293, z: 3170, npc: /al.kharid warrior|warrior/i }
         : { x: AL_KHARID_WARRIORS.x, z: AL_KHARID_WARRIORS.z, npc: /^guard$/i };
 
-      if (skill && skill.level >= 40 && !inAlKharid) {
+      if (skill && skill.level >= 40 && !inAlKharid && !guardFallback) {
         console.log(
           `[FINGERS] Upgrading to ${insideAlKharid ? "Al Kharid warriors (stranded east)" : "Varrock guards"}`
         );
@@ -180,8 +180,11 @@ await runScript(
             guardXpMark = xpNow;
             guardAttempts = 0;
           } else if (++guardAttempts >= 30) {
-            console.log("[FINGERS] Guards yield nothing — falling back to men");
+            console.log("[FINGERS] Guards yield nothing — back to Lumbridge men");
             guardFallback = true;
+            inAlKharid = false; // rejoin the proven Lumbridge men loop
+            await bot.walkTo(LUMBRIDGE_MEN.x, LUMBRIDGE_MEN.z);
+            continue;
           }
         }
         try {
