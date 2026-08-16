@@ -65,10 +65,11 @@ const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|new
 const MARCH_WAYPOINTS = [
     { x: 3245, z: 3235, r: 10 },  // NE of Lumbridge, open ground
     { x: 3262, z: 3253, r: 10 },  // junction west of cow fence (proven)
-    { x: 3242, z: 3283, r: 5 },   // road WEST of the potato field
-    { x: 3241, z: 3308, r: 5 },   // crossing at the field's west edge
-                                  // (potatoes span x=3244-3263 on z=3300 —
-                                  // loc-scan evidence, do not cut through)
+    { x: 3240, z: 3290, r: 4 },   // road south of the farm gate
+    { x: 3239, z: 3302, r: 3 },   // THE GATE: Gate(3239-3240,3301) — seen
+                                  // open in 84 loc scans; the only doorway
+                                  // through the z=3300 fence line
+    { x: 3245, z: 3315, r: 6 },   // north of the belt
     { x: 3264, z: 3321, r: 10 },  // road bend NE past the fields
     { x: 3280, z: 3340, r: 10 },  // open ground (proven)
     { x: 3285, z: 3365, r: 10 },  // North (proven)
@@ -77,8 +78,10 @@ const MARCH_WAYPOINTS = [
 ];
 // South face of the farm-belt fence: any unit that thinks it is past the
 // crossing but still sits in this box has NOT crossed — send it back to
-// the road approach instead of letting it grind north into the fence.
-const BELT = { x0: 3244, x1: 3280, z1: 3304, backTo: 2 };
+// the gate approach instead of letting it grind north into the fence.
+const BELT = { x0: 3236, x1: 3280, z1: 3304, backTo: 2 };
+// The farm gate itself — march-side handling opens it when it's closed.
+const FARM_GATE = { x0: 3236, x1: 3242, z0: 3294, z1: 3303 };
 
 class LawBot {
     private session: LiteSession | null = null;
@@ -631,6 +634,27 @@ class LawBot {
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
             if (this.tick % 60 === 0) {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length} stall=${wpStall}`);
+            }
+
+            // Farm-gate handling on the march: when heading for the gate WP
+            // and the gate is closed, open it directly — no waiting for a
+            // walk failure to route through the stuck-escape machinery.
+            if (distToWp < 14 &&
+                wp.x >= FARM_GATE.x0 && wp.x <= FARM_GATE.x1 &&
+                wp.z >= FARM_GATE.z0 - 2 && wp.z <= FARM_GATE.z1 + 2) {
+                const gate = (state.nearbyLocs ?? []).find(l =>
+                    /gate/i.test(l.name) &&
+                    l.x >= FARM_GATE.x0 && l.x <= FARM_GATE.x1 &&
+                    l.z >= FARM_GATE.z0 && l.z <= FARM_GATE.z1 &&
+                    l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
+                if (gate) {
+                    const opt = gate.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
+                    this.exec({ type: 'interactLoc', x: gate.x, z: gate.z, locId: gate.id, optionIndex: opt.opIndex, reason: 'farm-gate' });
+                    console.log(`[${this.name}] FARM-GATE open at (${gate.x},${gate.z})`);
+                    this.lastFailure = '';
+                    this.waitTicks = 4;
+                    return;
+                }
             }
 
             if (wpStall > 120 && this.marchWp < MARCH_WAYPOINTS.length) {
