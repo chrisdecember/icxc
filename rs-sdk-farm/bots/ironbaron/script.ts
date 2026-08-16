@@ -34,9 +34,28 @@ await runScript(
     let ironFallback = false;
     let ironXpMark = -1;
     let ironAttempts = 0;
+    let mineFailLogs = 0;
 
     async function walkWaypoints(points: { x: number; z: number }[]) {
       for (const p of points) await bot.walkTo(p.x, p.z);
+    }
+
+    // Death keeps the 3 most valuable items — which is the ORES, not the
+    // pickaxe. Toolless mining reads as "Nothing happened" forever.
+    async function ensurePickaxe() {
+      if (sdk.findInventoryItem(/pickaxe/i)) return;
+      console.log("[IRONMN] No pickaxe — earning 20gp and buying at Bob's");
+      await bot.walkTo(3232, 3218);
+      for (let i = 0; i < 40 && sdk.countInventoryItems(/coins/i) < 20; i++) {
+        try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
+        await bot.dismissBlockingUI();
+      }
+      await bot.walkTo(3230, 3203);
+      try {
+        await bot.openShop(/^bob$/i);
+        await bot.buyFromShop(/bronze pickaxe/i, 1);
+        await bot.closeShop();
+      } catch (_) {}
     }
 
     async function isAlive() {
@@ -62,8 +81,19 @@ await runScript(
         .sort((a: any, b: any) => (a.distance ?? 0) - (b.distance ?? 0))[0];
       if (rock) {
         try {
-          await bot.interactLoc(rock, /mine/i);
-        } catch (_) {}
+          const r = await bot.interactLoc(rock, /mine/i);
+          if (!r?.success && mineFailLogs < 5) {
+            mineFailLogs++;
+            console.log(
+              `[IRONMN] mine failed: ${r?.reason ?? "?"} ${r?.message ?? ""} on ${rock.name}@(${rock.x},${rock.z})`
+            );
+          }
+        } catch (e) {
+          if (mineFailLogs < 5) {
+            mineFailLogs++;
+            console.log(`[IRONMN] mine threw: ${(e as Error).message}`);
+          }
+        }
         await bot.dismissBlockingUI();
       } else {
         await sdk.waitForTicks(3);
@@ -144,6 +174,7 @@ await runScript(
       try { await bot.dropItem(junk, "all"); } catch (_) {}
     }
     console.log(`[IRONMN] Pack purged, ${28 - sdk.getInventory().length} free slots`);
+    await ensurePickaxe();
     await walkWaypoints(WAYPOINTS_TO_MINE);
 
     while (true) {
@@ -152,6 +183,7 @@ await runScript(
           `[IRONMN] Death detected — last seen at (${lastPos.x},${lastPos.z}) near [${lastNpcs.join(",")}] — recovering`
         );
         await sdk.waitForTicks(5);
+        await ensurePickaxe();
         await walkWaypoints(WAYPOINTS_TO_MINE);
         continue;
       }
