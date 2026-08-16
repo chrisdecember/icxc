@@ -348,14 +348,15 @@ class LawBot {
 
             const closedGates = (state.nearbyLocs ?? []).filter(l =>
                 /door|gate/i.test(l.name) &&
-                l.optionsWithIndex.some(o => /^open$/i.test(o.text)) &&
-                Math.hypot(l.x - px, l.z - pz) <= 6);
-            const reachableClosed = closedGates.find(g => g.reachable === true);
+                l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
+            const reachableClosed = closedGates
+                .filter(g => g.reachable === true)
+                .sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))[0];
             if (reachableClosed) {
                 const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: reachableClosed.x, z: reachableClosed.z, locId: reachableClosed.id, optionIndex: opt.opIndex, reason: 'gate-open' });
-                console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z})`);
-                this.waitTicks = 2;
+                console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z}) d=${Math.round(Math.hypot(reachableClosed.x - px, reachableClosed.z - pz))}`);
+                this.waitTicks = 5;
                 this.lastFailure = '';
                 this.escapeTries = 0;
                 // Walk THROUGH the gate: aim for the tile on the far side (away from bot)
@@ -367,8 +368,11 @@ class LawBot {
 
             // Lumbridge-zone escape: when stuck west of x=3240, force east
             if (!ramping && px < 3240 && pz > 3150 && pz < 3345) {
+                if (this.escapeTries % 8 === 1) {
+                    console.log(`[${this.name}] STUCK-EAST at (${px},${pz}) try=${this.escapeTries}`);
+                }
                 const moved = this.walkToward(px, pz, 3255, Math.max(pz, 3240), 'stuck-east');
-                if (!moved && this.escapeTries > 10) {
+                if (!moved && this.escapeTries > 15) {
                     this.lastFailure = '';
                     this.escapeTries = 0;
                 }
