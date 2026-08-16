@@ -496,7 +496,8 @@ class LawBot {
             });
         const target = preyAll.find(n => n.reachable !== false);
         const visible = preyAll[0];
-        if (!target && visible) {
+        const marching = this.marchWp >= 0 && Math.hypot(px - anchor.x, pz - anchor.z) > 14;
+        if (!target && visible && !marching) {
             this.walkToward(px, pz, visible.x, visible.z, 'stalk');
             this.waitTicks = 3;
             return;
@@ -537,7 +538,17 @@ class LawBot {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length}`);
             }
 
-            this.walkToward(px, pz, wp.x, wp.z, 'march');
+            const stuckTicks = this.tick - this.staleSince;
+            if (stuckTicks > 60) {
+                const jx = (3 + this.tick % 8) * (this.tick % 3 === 0 ? 1 : -1);
+                const jz = (3 + (this.tick * 5) % 8) * (this.tick % 5 < 2 ? 1 : -1);
+                this.exec({ type: 'walkTo', x: px + jx, z: pz + jz, running: true, reason: 'march-jitter' });
+                if (stuckTicks % 60 === 1) {
+                    console.log(`[${this.name}] MARCH-STUCK ${stuckTicks}t at (${px},${pz}) jitter (${jx},${jz})`);
+                }
+            } else {
+                this.walkToward(px, pz, wp.x, wp.z, 'march');
+            }
             this.waitTicks = 2;
             return;
         }
