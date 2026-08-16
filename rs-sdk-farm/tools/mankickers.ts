@@ -223,6 +223,8 @@ class KickBot {
             return;
         }
 
+        const toAnchor = Math.hypot(px - this.anchor.x, pz - this.anchor.z);
+
         // Stuck-escape: open a reachable closed door/gate, else jitter.
         if (/client_rejected|out_of_range|cant_reach/.test(this.lastFailure)) {
             this.escapeTries++;
@@ -285,8 +287,6 @@ class KickBot {
             }
             return;
         }
-
-        const toAnchor = Math.hypot(px - this.anchor.x, pz - this.anchor.z);
 
         // Stalk a visible-but-unreachable target, but only near the anchor —
         // chasing beyond leash distance traps bots at gates/walls (mankicker8).
