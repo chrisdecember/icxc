@@ -68,6 +68,9 @@ class LawBot {
     private designTicks = 0;
     lastFailure = '';
     private escapeTries = 0;
+    private staleX = -1;
+    private staleZ = -1;
+    private staleSince = 0;
 
     laws = 0;
     xpGained = 0;
@@ -103,6 +106,19 @@ class LawBot {
             this.tick++;
             this.onTick().catch(e => console.error(`[${this.name}] tick error:`, e));
         });
+    }
+
+    get stale(): boolean {
+        return this.tick - this.staleSince > 200 && this.staleSince > 0;
+    }
+
+    forceDisconnect(): void {
+        this.client?.setOnGameTickCallback(null);
+        this.session?.stop();
+        this.session = null;
+        this.client = null;
+        this.collector = null;
+        this.executor = null;
     }
 
     stop(): void {
@@ -223,6 +239,9 @@ class LawBot {
         const px = state.player.worldX;
         const pz = state.player.worldZ;
         this.px = px; this.pz = pz;
+        if (px !== this.staleX || pz !== this.staleZ) {
+            this.staleX = px; this.staleZ = pz; this.staleSince = this.tick;
+        }
 
         // Tutorial Island (x<3170, z<3145): the lite path never ported
         // bot.skipTutorial(), so every unit froze here — mainland walkTo is
@@ -427,14 +446,14 @@ class LawBot {
             return;
         }
         if (!target && !ramping && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
+            const useEastCorridor = pz < 3350 && px < 3245;
+            const marchTo = useEastCorridor ? { x: 3258, z: Math.min(pz + 3, anchor.z) } : anchor;
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
             if (this.tick % 80 === 0) {
-                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} to ${this.site.name}`);
+                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} to ${this.site.name}${useEastCorridor ? ' [east]' : ''}`);
             }
-            // Microstep: try 1-tile moves in priority order toward target.
-            // exec() is synchronous for walkTo — try next direction if one fails.
-            const tdx = Math.sign(anchor.x - px);
-            const tdz = Math.sign(anchor.z - pz);
+            const tdx = Math.sign(marchTo.x - px);
+            const tdz = Math.sign(marchTo.z - pz);
             const dirs = [
                 [tdx, tdz], [0, tdz], [tdx, 0],
                 [-tdx, tdz], [tdx, -tdz],
@@ -446,7 +465,7 @@ class LawBot {
                 if (!this.lastFailure) { stepped = true; break; }
             }
             if (!stepped) {
-                this.walkToward(px, pz, anchor.x, anchor.z, 'station');
+                this.walkToward(px, pz, marchTo.x, marchTo.z, 'station');
             }
             this.waitTicks = 2;
             return;
@@ -557,6 +576,13 @@ const report = setInterval(() => {
         console.log(
             `[lawswarm]   ${b.name} cl=${b.cl} hp=${b.hp} laws=${b.laws} xp=${b.xpGained} deaths=${b.deaths} pos=(${b.px},${b.pz}) ${b.lastFailure || ''} ${b.online ? '' : 'OFFLINE'}`
         );
+    }
+    for (const bot of bots) {
+        if (bot.stale && bot.online) {
+            console.warn(`[lawswarm] ${bot.name} STALE-RELOG at (${bot.px},${bot.pz}) — respawn fresh`);
+            bot.forceDisconnect();
+            void relogin(bot);
+        }
     }
 }, 120_000);
 
