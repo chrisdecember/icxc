@@ -23,8 +23,10 @@ await runScript(
     const ROUTE_WEST = [
       { x: 3092, z: 3245, rest: false }, // Draynor
       { x: 2965, z: 3335, rest: false }, // Falador south road (skirts hobgoblin peninsula)
-      { x: 2895, z: 3455, rest: true },  // Taverley — rest up before the pass
-      { x: 2850, z: 3487, rest: false }, // White Wolf pass — KEEP MOVING
+      { x: 2895, z: 3455, rest: true },  // Taverley — rest hp AND energy before the pass
+      // No mid-pass waypoint: field test showed stopping at (2850,3487) to
+      // read state cost dwell time in wolf aggro — 10 of 12 hp in one leg.
+      // Taverley -> Catherby as ONE leg; the pathfinder owns the crossing.
       { x: 2804, z: 3433, rest: true },  // Catherby — recover after the pass
       { x: 2661, z: 3305, rest: false }, // East Ardougne market
     ];
@@ -43,16 +45,21 @@ await runScript(
     const ARDY_BANK = { x: 2657, z: 3283 };
 
     // Regen is ~1hp/min; a few minutes parked in Taverley beats a corpse
-    // run from Lumbridge. Eats food first if we happen to hold any.
+    // run from Lumbridge. Also waits on RUN ENERGY — crossing the pass at
+    // walking speed is what let the wolves land 10 hits. Eats food first
+    // if we happen to hold any.
     async function restUntilHp(frac: number, maxTicks = 900) {
       for (let t = 0; t < maxTicks; t += 20) {
         const st = sdk.getState()?.player;
-        if (!st || st.hp <= 0 || st.hp >= st.maxHp * frac) return;
+        if (!st || st.hp <= 0) return;
+        const e = (st as any).runEnergy ?? 0;
+        const eMax = e > 100 ? 10000 : 100; // server uses 0-10000; tolerate 0-100
+        if (st.hp >= st.maxHp * frac && e >= eMax * 0.6) return;
         const food = sdk.findInventoryItem(/cake|bread/i);
         if (food) {
           try { await bot.eatFood(food); } catch (_) {}
         }
-        if (t === 0) console.log(`[FINGERS] Resting (${st.hp}/${st.maxHp} hp)`);
+        if (t === 0) console.log(`[FINGERS] Resting (${st.hp}/${st.maxHp} hp, energy ${e})`);
         await sdk.waitForTicks(20);
       }
     }
