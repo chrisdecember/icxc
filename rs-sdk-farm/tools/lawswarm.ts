@@ -422,6 +422,25 @@ class LawBot {
             }
         }
 
+        // Loot law runes BEFORE attack/escape — the stuck-escape loop can
+        // starve the loot code if it sits below (v7.23: was after gear).
+        const nearVault = Math.hypot(px - VAULT.x, pz - VAULT.z) <= 8;
+        const vaultCooldown = this.tick - this.vaultDropTick < 15;
+        const lawPile = (nearVault || vaultCooldown) ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
+        if (lawPile) {
+            this.exec({ type: 'pickupItem', x: lawPile.x, z: lawPile.z, itemId: lawPile.id, reason: 'LAW' });
+            this.waitTicks = 3;
+            return;
+        }
+        const coinPile = this.laws >= 2 ? undefined : state.groundItems.find(
+            g => /^coins$/i.test(g.name) && Math.hypot(g.x - px, g.z - pz) <= 2
+        );
+        if (coinPile) {
+            this.exec({ type: 'pickupItem', x: coinPile.x, z: coinPile.z, itemId: coinPile.id, reason: 'coins' });
+            this.waitTicks = 2;
+            return;
+        }
+
         // Opportunistic attack: check for attackable targets BEFORE stuck-
         // escape — a unit jittering near men can still train combat.
         // Non-ramping units target dark wizards AND men — units stuck far from
@@ -642,26 +661,6 @@ class LawBot {
             // Wield option is the weapon's first inventory option.
             this.exec({ type: 'useInventoryItem', slot: newSword.slot, optionIndex: 1, reason: 'GEAR wield' });
             console.log(`[${this.name}] GEAR wielding ${newSword.name}`);
-            this.waitTicks = 2;
-            return;
-        }
-
-        // Loot law runes — suppress near the vault tile (radius 8) AND for
-        // 15 ticks after any vault-drop to prevent the drop-reloot cycle
-        // (v7.19 bug, widened in v7.21 after drift at radius 3).
-        const nearVault = Math.hypot(px - VAULT.x, pz - VAULT.z) <= 8;
-        const vaultCooldown = this.tick - this.vaultDropTick < 15;
-        const lawPile = (nearVault || vaultCooldown) ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
-        if (lawPile) {
-            this.exec({ type: 'pickupItem', x: lawPile.x, z: lawPile.z, itemId: lawPile.id, reason: 'LAW' });
-            this.waitTicks = 3;
-            return;
-        }
-        const coinPile = this.laws >= 2 ? undefined : state.groundItems.find(
-            g => /^coins$/i.test(g.name) && Math.hypot(g.x - px, g.z - pz) <= 2
-        );
-        if (coinPile) {
-            this.exec({ type: 'pickupItem', x: coinPile.x, z: coinPile.z, itemId: coinPile.id, reason: 'coins' });
             this.waitTicks = 2;
             return;
         }
