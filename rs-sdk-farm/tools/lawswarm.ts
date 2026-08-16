@@ -385,9 +385,8 @@ class LawBot {
             }
         }
 
-        const resting = maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4);
         const traveling = Math.hypot(px - anchor.x, pz - anchor.z) > 14;
-        if (traveling && !resting && !this.lastFailure && this.tick - this.staleSince > 30 && this.staleSince > 0) {
+        if (traveling && !this.recovering && !this.lastFailure && this.tick - this.staleSince > 30 && this.staleSince > 0) {
             this.lastFailure = 'walk:client_rejected-silent';
         }
 
@@ -547,7 +546,10 @@ class LawBot {
         // at 40% a wizard pair finishes a unit before it clears aggro range
         // (three 0-law circle deaths proved it). Rest spot pushed to +20/-14
         // so regen happens outside wizard wander range.
-        const restX = anchor.x + 20, restZ = anchor.z - 14;
+        // Rest ON the proven east corridor (z=anchor.z), 30 tiles out — the
+        // old spot (+20,-14) sat inside the tree cluster SE of the circle,
+        // trapping recovered units 34 tiles from anchor with trees between.
+        const restX = anchor.x + 30, restZ = anchor.z;
         if (this.recovering) {
             if (Math.hypot(px - restX, pz - restZ) > 4) {
                 this.walkToward(px, pz, restX, restZ, 'rest');
@@ -718,6 +720,31 @@ class LawBot {
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
             if (this.tick % 60 === 0) {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length} stall=${wpStall}`);
+            }
+
+            // Gate-aim: near the gate WP (inside the cattle pen or on the
+            // south approach), walk STRAIGHT AT the gate tile. Force-probe
+            // offsets aim west past the doorway and strand units circling
+            // the pen with every gate around them standing open.
+            if (wpIdx === 3 && this.marchWp === 3 &&
+                px >= 3232 && px <= 3248 && pz >= 3288 && pz <= 3300) {
+                this.exec({ type: 'walkTo', x: 3240, z: 3302, running: true, reason: 'gate-aim' });
+                this.lastFailure = '';
+                if (this.tick % 40 === 0) {
+                    console.log(`[${this.name}] GATE-AIM at (${px},${pz}) -> (3240,3302)`);
+                }
+                this.waitTicks = 4;
+                return;
+            }
+
+            // Finished-route recovery: a unit past the last WP but far from
+            // the circle (recovery walks drift it) re-targets the western
+            // approach WP instead of cutting straight through the trees.
+            if (this.marchWp >= MARCH_WAYPOINTS.length && wpStall > 300 &&
+                Math.hypot(px - anchor.x, pz - anchor.z) > 20) {
+                this.marchWp = MARCH_WAYPOINTS.length - 1;
+                this.marchWpSince = this.tick;
+                console.log(`[${this.name}] MARCH-REAPPROACH from (${px},${pz})`);
             }
 
             // Farm-gate handling on the march: when heading for the gate WP
