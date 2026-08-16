@@ -3,6 +3,7 @@ import { runScript } from "../../sdk/runner";
 // DRONE: THE THIEF — pickpocket machine, GP generator, tool distributor
 // Pickpockets men at Lumbridge, banks gold, delivers surplus to KING.
 // Thieving 1→43 in ~10 min, 1→54 in ~15 min. Generates 200+ GP fast.
+// Enhanced: death recovery, kebab sustain loop, dual-phase thieving.
 
 await runScript(
   async (ctx) => {
@@ -10,13 +11,73 @@ await runScript(
     await bot.skipTutorial();
 
     const MEETING_POINT = { x: 3222, z: 3218 };
+    const LUMBRIDGE_MEN = { x: 3222, z: 3218 };
+    const AL_KHARID_WARRIORS = { x: 3293, z: 3170 };
+    const AL_KHARID_BANK = { x: 3269, z: 3167 };
+    const KEBAB_SELLER = { x: 3273, z: 3180 };
+    const DRAYNOR_BANK = { x: 3092, z: 3243 };
+
+    let totalGP = 0;
+    let inAlKharid = false;
+
+    async function isAlive() {
+      const state = sdk.getState();
+      return state?.player && state.player.hp > 0;
+    }
+
+    async function recoverFromDeath() {
+      console.log("[FINGERS] Death detected — recovering at Lumbridge");
+      await sdk.waitForTicks(5);
+      inAlKharid = false;
+      await bot.walkTo(LUMBRIDGE_MEN.x, LUMBRIDGE_MEN.z);
+    }
+
+    async function eatIfLow(threshold = 0.4) {
+      const state = sdk.getState();
+      if (!state?.player) return;
+      if (state.player.hp < state.player.maxHp * threshold) {
+        const food =
+          sdk.findInventoryItem(/kebab/i) ||
+          sdk.findInventoryItem(/shrimps/i) ||
+          sdk.findInventoryItem(/bread/i);
+        if (food) await bot.eatFood(food);
+      }
+    }
+
+    async function buyKebabs(count = 5) {
+      await bot.walkTo(KEBAB_SELLER.x, KEBAB_SELLER.z);
+      try {
+        const seller =
+          sdk.findNearbyNpc(/karim/i) || sdk.findNearbyNpc(/kebab/i);
+        if (seller) {
+          await bot.openShop(seller);
+          await bot.buyFromShop(/kebab/i, count);
+          await bot.closeShop();
+        }
+      } catch (_) {}
+    }
+
+    async function bankGold() {
+      const bank = inAlKharid ? AL_KHARID_BANK : DRAYNOR_BANK;
+      const coins = sdk.countInventoryItems(/coins/i);
+      if (coins < 50) return;
+
+      await bot.walkTo(bank.x, bank.z);
+      try {
+        await bot.openBank();
+        await bot.depositItem(/coins/i, -1);
+        await bot.closeBank();
+        totalGP += coins;
+        console.log(`[FINGERS] Banked ${coins} GP (total: ${totalGP})`);
+      } catch (_) {}
+    }
 
     async function deliverToKing() {
       const king = sdk.findNearbyPlayer(/king/i);
       if (!king) return false;
       try {
         const result = await bot.trade(king, { timeout: 15_000 });
-        return result.success;
+        return result?.success ?? false;
       } catch (_) {
         return false;
       }
@@ -27,12 +88,15 @@ await runScript(
     // ═══════════════════════════════════════════════════════
     console.log("[FINGERS] Phase 1: Generating seed money");
     await sdk.say("fingers is on the job");
-    await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
+    await bot.walkTo(LUMBRIDGE_MEN.x, LUMBRIDGE_MEN.z);
 
     while (true) {
+      if (!(await isAlive())) {
+        await recoverFromDeath();
+        continue;
+      }
       const skill = sdk.getSkill("Thieving");
       if (skill && skill.level >= 25) break;
-
       try {
         await bot.pickpocketNpc(/^man$/i);
       } catch (_) {}
@@ -45,92 +109,81 @@ await runScript(
     console.log("[FINGERS] Phase 2: Buying tools for the swarm");
 
     await bot.walkTo(3212, 3247);
-    await bot.openShop(/shop.*keeper/i);
-    try { await bot.buyFromShop(/hammer/i, 1); } catch (_) {}
-    try { await bot.buyFromShop(/tinderbox/i, 1); } catch (_) {}
-    await bot.closeShop();
+    try {
+      await bot.openShop(/shop.*keeper/i);
+      try { await bot.buyFromShop(/hammer/i, 1); } catch (_) {}
+      try { await bot.buyFromShop(/tinderbox/i, 1); } catch (_) {}
+      await bot.closeShop();
+    } catch (_) {}
 
     await bot.walkTo(3230, 3203);
-    await bot.openShop(/^bob$/i);
-    try { await bot.buyFromShop(/bronze axe/i, 1); } catch (_) {}
-    try { await bot.buyFromShop(/bronze pickaxe/i, 1); } catch (_) {}
-    await bot.closeShop();
+    try {
+      await bot.openShop(/^bob$/i);
+      try { await bot.buyFromShop(/bronze axe/i, 1); } catch (_) {}
+      try { await bot.buyFromShop(/bronze pickaxe/i, 1); } catch (_) {}
+      await bot.closeShop();
+    } catch (_) {}
 
-    await sdk.say("fingers has tools, heading to meeting point");
+    await sdk.say("fingers has tools heading to meeting point");
     await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
     await deliverToKing();
 
     // ═══════════════════════════════════════════════════════
     //  PHASE 3: INFINITE PICKPOCKET LOOP
-    //  Push thieving as high as possible, bank gold
+    //  Lumbridge men until 40, then Al Kharid warriors
     // ═══════════════════════════════════════════════════════
     console.log("[FINGERS] Phase 3: Infinite thieving loop");
     await sdk.say("fingers going infinite");
 
-    let totalGP = 0;
-
     while (true) {
+      if (!(await isAlive())) {
+        await recoverFromDeath();
+        continue;
+      }
+
       const skill = sdk.getSkill("Thieving");
 
-      // After Thieving 40, move to Al Kharid warriors for better GP
-      if (skill && skill.level >= 40) {
+      if (skill && skill.level >= 40 && !inAlKharid) {
         console.log("[FINGERS] Upgrading to Al Kharid warriors");
         await bot.walkTo(3268, 3228);
-        // Pay toll
         try {
           await bot.interactLoc(/gate/i, /pay/i);
           await bot.navigateDialog([1]);
           await bot.waitForDialogClose();
         } catch (_) {
-          await bot.walkTo(3277, 3227);
+          try { await bot.walkTo(3277, 3227); } catch (_) {}
         }
-        await bot.walkTo(3293, 3170);
-
-        while (true) {
-          try {
-            await bot.pickpocketNpc(/al.kharid warrior/i);
-          } catch (_) {}
-          await bot.dismissBlockingUI();
-
-          const state = sdk.getState();
-          if (state?.player && state.player.hp < state.player.maxHp * 0.4) {
-            await bot.walkTo(3273, 3180);
-            const kebab = sdk.findNearbyNpc(/kebab/i);
-            if (kebab) {
-              await bot.openShop(kebab);
-              try { await bot.buyFromShop(/kebab/i, 5); } catch (_) {}
-              await bot.closeShop();
-            }
-            const food = sdk.findInventoryItem(/kebab/i);
-            if (food) await bot.eatFood(food);
-            await bot.walkTo(3293, 3170);
-          }
-
-          const coins = sdk.countInventoryItems(/coins/i);
-          if (coins > 300) {
-            await bot.walkTo(3269, 3167);
-            await bot.openBank();
-            await bot.depositItem(/coins/i, -1);
-            await bot.closeBank();
-            totalGP += coins;
-            console.log(`[FINGERS] Banked ${coins} GP (total: ${totalGP})`);
-            await bot.walkTo(3293, 3170);
-          }
-        }
+        await bot.walkTo(AL_KHARID_WARRIORS.x, AL_KHARID_WARRIORS.z);
+        inAlKharid = true;
+        await buyKebabs(10);
+        continue;
       }
 
-      // Pre-40: pickpocket men at Lumbridge
-      try {
-        await bot.pickpocketNpc(/^man$/i);
-      } catch (_) {}
-      await bot.dismissBlockingUI();
+      if (inAlKharid) {
+        try {
+          await bot.pickpocketNpc(/al.kharid warrior/i);
+        } catch (_) {}
+        await bot.dismissBlockingUI();
+        await eatIfLow(0.4);
 
-      if (sdk.getInventory().length >= 26) {
-        await bot.walkTo(3092, 3243);
-        await bot.openBank();
-        await bot.depositItem(/coins/i, -1);
-        await bot.closeBank();
-        await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
+        if (!sdk.findInventoryItem(/kebab/i)) {
+          await buyKebabs(10);
+        }
+
+        if (sdk.countInventoryItems(/coins/i) > 300) {
+          await bankGold();
+          await bot.walkTo(AL_KHARID_WARRIORS.x, AL_KHARID_WARRIORS.z);
+        }
+      } else {
+        try {
+          await bot.pickpocketNpc(/^man$/i);
+        } catch (_) {}
+        await bot.dismissBlockingUI();
+
+        if (sdk.getInventory().length >= 26) {
+          await bankGold();
+          await bot.walkTo(LUMBRIDGE_MEN.x, LUMBRIDGE_MEN.z);
+        }
       }
     }
   },
