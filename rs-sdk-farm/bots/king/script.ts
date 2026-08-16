@@ -197,6 +197,16 @@ await runScript(
 
       await walkWaypoints(WAYPOINTS_TO_MINE);
 
+      // A full pack (drone deliveries pile up) makes mining a no-op forever.
+      // Shed spent/replaceable goods until there's room for the ore targets.
+      const shedOrder = [/arrow shaft/i, /^logs$/i, /oak logs/i, /raw shrimps/i, /cowhide/i];
+      let shedIdx = 0;
+      while (sdk.getInventory().length > 27 - 4 && shedIdx < shedOrder.length) {
+        try { await bot.dropItem(shedOrder[shedIdx], "all"); } catch (_) {}
+        shedIdx++;
+      }
+      console.log(`[KING] Pack after shed: ${sdk.getInventory().length}/28`);
+
       while (
         sdk.countInventoryItems(/copper ore/i) < copperTarget ||
         sdk.countInventoryItems(/tin ore/i) < tinTarget
