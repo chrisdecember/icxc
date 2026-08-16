@@ -63,6 +63,7 @@ class LawBot {
     private xpBase = -1;
     private designTicks = 0;
     lastFailure = '';
+    private escapeTries = 0;
 
     laws = 0;
     xpGained = 0;
@@ -110,8 +111,10 @@ class LawBot {
     private exec(action: BotAction): void {
         if (!this.executor) return;
         const res = this.executor.execute(action);
-        if (!(res instanceof Promise) && !res.success) {
-            this.lastFailure = `${action.type}:${res.reason ?? res.message}`;
+        if (!(res instanceof Promise)) {
+            // Clear on success — a sticky failure string would trap units in
+            // the stuck-escape branch forever after one bad walk.
+            this.lastFailure = res.success ? '' : `${action.type}:${res.reason ?? res.message}`;
         }
         if (res instanceof Promise) {
             this.busy = true;
@@ -234,6 +237,34 @@ class LawBot {
             }
             return;
         }
+
+        // Stuck-escape: the post-tutorial teleport dropped all 16 units on
+        // ONE tile (3235,3236) where findPathToTile rejects every route —
+        // either an enclosed spot (closed door) or stale collision after the
+        // rebuild. Odd tries open any door/gate in reach; even tries jitter
+        // to an adjacent tile to give the pathfinder a fresh origin.
+        if (/client_rejected/.test(this.lastFailure)) {
+            this.escapeTries++;
+            if (this.escapeTries === 1) {
+                const locs = (state.nearbyLocs ?? []).slice(0, 10)
+                    .map(l => `${l.name}(${l.x},${l.z})`).join(' ');
+                console.log(`[${this.name}] STUCK-ESCAPE at (${px},${pz}); locs: ${locs || 'none'}`);
+            }
+            const door = (state.nearbyLocs ?? []).find(l =>
+                /door|gate/i.test(l.name) &&
+                l.optionsWithIndex.some(o => /open/i.test(o.text)));
+            if (door && this.escapeTries % 2 === 1) {
+                const opt = door.optionsWithIndex.find(o => /open/i.test(o.text))!;
+                this.exec({ type: 'interactLoc', x: door.x, z: door.z, locId: door.id, optionIndex: opt.opIndex, reason: 'escape-door' });
+            } else {
+                const dx = [1, -1, 2, -2, 0, 0][this.escapeTries % 6];
+                const dz = [0, 0, 0, 0, 2, -2][this.escapeTries % 6];
+                this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'escape-jitter' });
+            }
+            this.waitTicks = 2;
+            return;
+        }
+        this.escapeTries = 0;
 
         const ramping = this.cl < RAMP_UNTIL;
         const iceTier = ICE_ENABLED && this.cl >= 45;

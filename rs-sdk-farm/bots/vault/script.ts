@@ -13,6 +13,10 @@ await runScript(
     await bot.skipTutorial();
 
     const VAULT = { x: 3227, z: 3368 };
+    // Camping ON the circle got the vault killed — dark wizards aggro low
+    // levels. Wait just south (locs stay visible within the 15-tile scan),
+    // dash in only when a law pile actually exists.
+    const WAIT = { x: 3231, z: 3353 };
     const BANK = { x: 3185, z: 3436 };
     const BANK_AT = 30;
     const ADS = [
@@ -40,13 +44,15 @@ await runScript(
         try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
         await bot.dismissBlockingUI();
       }
-      await bot.walkTo(VAULT.x, VAULT.z);
+      await bot.walkTo(WAIT.x, WAIT.z);
     }
 
     async function hooverPiles() {
+      let dashed = false;
       for (let i = 0; i < 6; i++) {
         const pile = sdk.findGroundItem(/law rune/i);
         if (!pile) break;
+        dashed = true;
         try {
           await bot.pickupItem(pile);
           console.log(
@@ -55,6 +61,8 @@ await runScript(
         } catch (_) {}
         await sdk.waitForTicks(2);
       }
+      // Never linger in wizard aggro range after a dash.
+      if (dashed) await bot.walkTo(WAIT.x, WAIT.z);
     }
 
     async function bankIfFull() {
@@ -69,7 +77,7 @@ await runScript(
         lawsBanked += laws;
         console.log(`[VAULT] LAW-MONOPOLY banked total: ${lawsBanked}`);
       } catch (_) {}
-      await bot.walkTo(VAULT.x, VAULT.z);
+      await bot.walkTo(WAIT.x, WAIT.z);
     }
 
     async function buyingDesk(minutes: number) {
@@ -92,13 +100,13 @@ await runScript(
     // ═══════════════════════════════════════════════════════
     console.log("[VAULT] Clearing house opens at the wizard circle");
     await sdk.say("the law exchange is open");
-    await bot.walkTo(VAULT.x, VAULT.z);
+    await bot.walkTo(WAIT.x, WAIT.z);
 
     while (true) {
       if (!(await isAlive())) {
         console.log("[VAULT] Death — recovering");
         await sdk.waitForTicks(5);
-        await bot.walkTo(VAULT.x, VAULT.z);
+        await bot.walkTo(WAIT.x, WAIT.z);
         continue;
       }
       // Manual research finding: there's no meaningful merch area besides
