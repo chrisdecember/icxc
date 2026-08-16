@@ -319,6 +319,7 @@ class LawBot {
                 });
             const opportunistic = nearbyPrey[0];
             if (opportunistic) {
+                const savedFailure = this.lastFailure;
                 const opt = opportunistic.optionsWithIndex.find(o => /attack/i.test(o.text))!;
                 this.exec({ type: 'interactNpc', npcIndex: opportunistic.index, optionIndex: opt.opIndex, reason: 'attack' });
                 this.lastAttackTick = this.tick;
@@ -326,10 +327,8 @@ class LawBot {
                     this.escapeTries = 0;
                     return;
                 }
-                // cant_reach from attack = NPC too far, NOT the bot stuck.
-                // Clear so march logic runs instead of stuck-escape.
                 if (/cant_reach/.test(this.lastFailure)) {
-                    this.lastFailure = '';
+                    this.lastFailure = savedFailure;
                 }
             }
         }
@@ -538,16 +537,9 @@ class LawBot {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length}`);
             }
 
-            const stuckTicks = this.tick - this.staleSince;
-            if (stuckTicks > 60) {
-                const jx = (3 + this.tick % 8) * (this.tick % 3 === 0 ? 1 : -1);
-                const jz = (3 + (this.tick * 5) % 8) * (this.tick % 5 < 2 ? 1 : -1);
-                this.exec({ type: 'walkTo', x: px + jx, z: pz + jz, running: true, reason: 'march-jitter' });
-                if (stuckTicks % 60 === 1) {
-                    console.log(`[${this.name}] MARCH-STUCK ${stuckTicks}t at (${px},${pz}) jitter (${jx},${jz})`);
-                }
-            } else {
-                this.walkToward(px, pz, wp.x, wp.z, 'march');
+            const moved = this.walkToward(px, pz, wp.x, wp.z, 'march');
+            if (!moved) {
+                this.lastFailure = 'march:cant_reach';
             }
             this.waitTicks = 2;
             return;
