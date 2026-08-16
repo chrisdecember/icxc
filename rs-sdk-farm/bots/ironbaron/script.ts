@@ -88,6 +88,21 @@ await runScript(
         } catch (_) {}
       }
       if (!delivered) {
+        // KING may be at the furnace smelting rather than the courtyard.
+        await bot.walkTo(3225, 3256);
+        const kingAtFurnace = sdk.findNearbyPlayer(/king/i);
+        if (kingAtFurnace) {
+          try {
+            const r = await bot.trade(kingAtFurnace, {
+              give: [{ name: /ore/i, amount: -1 }],
+              timeout: 30_000,
+            });
+            delivered = r.success;
+          } catch (_) {}
+        }
+      }
+      if (!delivered) {
+        await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
         try {
           await bot.serveTrades({
             give: [{ name: /iron ore/i, amount: -1 }],
@@ -98,6 +113,11 @@ await runScript(
         } catch (_) {}
         try { await bot.dropItem(/copper ore/i, "all"); } catch (_) {}
         try { await bot.dropItem(/tin ore/i, "all"); } catch (_) {}
+        // No buyers: shed iron down to a small hawking reserve so the pack
+        // never stays full — a full pack means zero mining forever.
+        while (sdk.countInventoryItems(/iron ore/i) > 10) {
+          try { await bot.dropItem(/iron ore/i, 1); } catch (_) { break; }
+        }
       }
       await walkWaypoints(WAYPOINTS_TO_MINE);
     }
