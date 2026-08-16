@@ -491,13 +491,33 @@ class LawBot {
         }
         this.escapeTries = 0;
 
-        // Rest when low: step off the circle and let regen work.
-        if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4)) {
-            if (Math.hypot(px - (anchor.x + 14), pz - (anchor.z - 10)) > 4) {
-                this.walkToward(px, pz, anchor.x + 14, anchor.z - 10, 'rest');
+        // Rest when low: step off the circle and let regen work. 55% cutoff —
+        // at 40% a wizard pair finishes a unit before it clears aggro range
+        // (three 0-law circle deaths proved it). Rest spot pushed to +20/-14
+        // so regen happens outside wizard wander range.
+        const restX = anchor.x + 20, restZ = anchor.z - 14;
+        if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.55)) {
+            if (Math.hypot(px - restX, pz - restZ) > 4) {
+                this.walkToward(px, pz, restX, restZ, 'rest');
             }
             this.waitTicks = 40;
             return;
+        }
+
+        // Retreat when swarmed: 3+ dark wizards inside 8 tiles is a losing
+        // fight at this tier — disengage to the rest spot before the gang
+        // burns the HP pool. Uptime farms laws; deaths farm nothing.
+        if (!ramping && Math.hypot(px - anchor.x, pz - anchor.z) <= 14) {
+            const packed = state.nearbyNpcs.filter(n =>
+                /^dark wizard$/i.test(n.name) && n.distance <= 8).length;
+            if (packed >= 3 && hp < maxHp * 0.8) {
+                if (this.tick % 40 === 0) {
+                    console.log(`[${this.name}] CIRCLE-RETREAT ${packed} wizards packed, hp=${hp}/${maxHp}`);
+                }
+                this.walkToward(px, pz, restX, restZ, 'retreat');
+                this.waitTicks = 8;
+                return;
+            }
         }
 
         // Vault run: carry the stack to the drop tile; gtvault banks it.
