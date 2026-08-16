@@ -1,10 +1,13 @@
 import { runScript } from "../../sdk/runner";
 
-// MERCHANT-ARBITRAGEUR: THE FLETCHER'S FRIEND — cash-to-consumables arb.
-// Server economics: cash is inflated junk to agents, but NPC shops still
-// honor static prices. We print cash (pickpocketing), buy ranged-training
-// consumables at Lowe's (bronze arrows 1gp, stock 2000), and barter them
-// at the Lumbridge hub for real goods. Cornering the ammo niche.
+// GTARB v2 — THE CHOKEPOINT. Gerrant's at Port Sarim is the only
+// reachable seller of small fishing nets (stock: 5) and the agent swarm
+// drains it — we measured the shortage on our own fisher. This bot OWNS
+// that counter: buys out every restock, then stands at the empty shop
+// serving trades to fishers who walk in and find nothing. Selling at the
+// exact point of need, priced in goods (barter) because cash is junk.
+//
+// Self-funding: pickpockets Port Sarim locals between restocks.
 
 await runScript(
   async (ctx) => {
@@ -12,17 +15,15 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    const LUMBRIDGE_HUB = { x: 3222, z: 3218 };
-    const LOWES = { x: 3232, z: 3423 };
-    const VARROCK_GUARDS = { x: 3207, z: 3381 };
-    const XP_GOODS = /(ore$|^logs$|oak logs|^raw |bar$|^bones$)/i;
-
+    const GERRANTS = { x: 3014, z: 3224 };
     const ADS = [
-      "arrows for trade! bronze + iron arrows, want any goods",
-      "ammo merchant: arrows and bows for your spare ores/logs/fish",
-      "ranged training supplies -- barter only, cash is trash",
+      "nets in stock here -- shop is empty, trade me. goods or coins",
+      "small fishing nets available. the shop restocks slow, i dont",
+      "need a net? trade me anything for it",
     ];
     let adIdx = 0;
+    let netsBought = 0;
+    let netsSold = 0;
 
     async function isAlive() {
       const state = sdk.getState();
@@ -30,93 +31,79 @@ await runScript(
       return state.player.hp > 0;
     }
 
-    async function printCash(targetCoins: number) {
-      console.log(`[ARB] Printing cash toward ${targetCoins}gp`);
-      const thiev = sdk.getSkill("Thieving")?.level ?? 1;
-      const spot = thiev >= 40 ? VARROCK_GUARDS : LUMBRIDGE_HUB;
-      const npc = thiev >= 40 ? /^guard$/i : /^man$/i;
-      await bot.walkTo(spot.x, spot.z);
-      let ticks = 0;
-      while (sdk.countInventoryItems(/coins/i) < targetCoins && ticks < 400) {
-        if (!(await isAlive())) {
-          await sdk.waitForTicks(5);
-          await bot.walkTo(spot.x, spot.z);
-        }
-        try { await bot.pickpocketNpc(npc); } catch (_) {}
+    async function earnCoins(target: number) {
+      let tries = 0;
+      while (sdk.countInventoryItems(/coins/i) < target && tries < 120) {
+        try { await bot.pickpocketNpc(/^man$|^woman$/i); } catch (_) {}
         await bot.dismissBlockingUI();
-        ticks++;
+        tries++;
+        const st = sdk.getState()?.player;
+        if (st && st.hp < st.maxHp * 0.3) {
+          await sdk.waitForTicks(40); // rest a moment
+        }
       }
-      console.log(`[ARB] Cash on hand: ${sdk.countInventoryItems(/coins/i)}gp`);
     }
 
-    async function buyStock() {
-      console.log("[ARB] Restocking at Lowe's Archery Emporium");
-      await bot.walkTo(LOWES.x, LOWES.z);
+    async function sweepNets() {
       try {
-        await bot.openShop(/lowe/i);
-        const coins = sdk.countInventoryItems(/coins/i);
-        // Bronze arrows 1gp: spend up to half the cash; iron arrows with the rest
-        try { await bot.buyFromShop(/bronze arrow/i, Math.min(200, Math.floor(coins / 2))); } catch (_) {}
-        try { await bot.buyFromShop(/iron arrow/i, Math.min(50, Math.floor(coins / 6))); } catch (_) {}
-        try { await bot.buyFromShop(/shortbow/i, 2); } catch (_) {}
+        await bot.openShop(/gerrant/i);
+        for (let i = 0; i < 5; i++) {
+          try {
+            await bot.buyFromShop(/small fishing net/i, 1);
+            netsBought++;
+          } catch (_) { break; }
+        }
+        // Arrows for the ranged-training crowd while we're here
+        try { await bot.buyFromShop(/feather/i, 50); } catch (_) {}
         await bot.closeShop();
+        console.log(
+          `[ARB] Stock: ${sdk.countInventoryItems(/fishing net/i)} nets held (${netsBought} bought lifetime)`
+        );
       } catch (e) {
-        console.log(`[ARB] Shop failed: ${(e as Error).message}`);
+        console.log(`[ARB] Shop sweep failed: ${(e as Error).message}`);
       }
     }
 
-    async function hawk(minutes: number) {
-      await bot.walkTo(LUMBRIDGE_HUB.x, LUMBRIDGE_HUB.z);
+    async function sellAtCounter(minutes: number) {
       await sdk.say(ADS[adIdx++ % ADS.length]);
       try {
         const res = await bot.serveTrades({
-          give: [
-            { name: /bronze arrow/i, amount: 100 },
-            { name: /shortbow/i, amount: 1 },
-          ],
+          give: [{ name: /small fishing net/i, amount: 1 }],
           accept: (offer) => offer.length > 0,
-          onTrade: (t) =>
+          onTrade: (t) => {
+            netsSold++;
             console.log(
-              `[ARB] TRADE with ${t.partner}: got ${t.received.map((r) => r.name).join(",") || "nothing"}`
-            ),
+              `[ARB] SOLD to ${t.partner}: got ${t.received.map((r) => r.name).join(",") || "nothing"} (${netsSold} sales)`
+            );
+          },
           timeout: minutes * 60_000,
-        });
-        if (res.trades.length)
-          console.log(`[ARB] ${res.trades.length} trades this cycle`);
-      } catch (_) {}
-    }
-
-    async function deliverToKing() {
-      const goods = sdk.getInventory().filter((i) => XP_GOODS.test(i.name));
-      if (goods.length === 0) return;
-      const king = sdk.findNearbyPlayer(/king/i);
-      if (!king) return;
-      console.log(`[ARB] Delivering ${goods.length} XP goods to the king`);
-      try {
-        await bot.trade(king, {
-          give: goods.map((g) => ({ name: new RegExp(g.name, "i"), amount: -1 })),
-          timeout: 30_000,
         });
       } catch (_) {}
     }
 
     // ═══════════════════════════════════════════════════════
-    console.log("[ARB] The arbitrageur opens for business");
-    await sdk.say("ammo merchant setting up shop");
+    console.log("[ARB] v2: Taking the net chokepoint at Gerrant's");
+    await sdk.say("heading to port sarim. the net market is mine");
+    await bot.walkTo(3092, 3245);
+    await bot.walkTo(3040, 3230);
+    await bot.walkTo(GERRANTS.x, GERRANTS.z);
 
     while (true) {
       if (!(await isAlive())) {
         console.log("[ARB] Death detected — recovering");
         await sdk.waitForTicks(5);
+        await bot.walkTo(3092, 3245);
+        await bot.walkTo(3040, 3230);
+        await bot.walkTo(GERRANTS.x, GERRANTS.z);
         continue;
       }
 
-      if (!sdk.findInventoryItem(/arrow/i)) {
-        await printCash(300);
-        await buyStock();
+      if (sdk.countInventoryItems(/coins/i) < 40) {
+        await earnCoins(60);
       }
-      await hawk(6);
-      await deliverToKing();
+
+      await sweepNets();
+      await sellAtCounter(5);
     }
   },
   { timeout: 86_400_000 }

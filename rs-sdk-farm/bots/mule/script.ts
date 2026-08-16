@@ -3,7 +3,7 @@ import { runScript } from "../../sdk/runner";
 // MERCHANT MULE — barter-economy arbitrage minion.
 // Server economics (observed): labor is free so commodities are abundant,
 // cash is inflated junk, and the scarce thing is *inputs at the right place*.
-// The mule turns our waste stream (cowhides, bones the KING drops) into
+// The mule turns our waste stream (cowhides, const STOCK = /cowhide|bones|raw beef|beer|feather|hammer|tinderbox|axe|pickaxe|chisel|shears|fishing net|arrow/i; the KING drops) into
 // XP-dense inputs (ores, logs, raw fish, bars) by hawking barter trades at
 // whichever hub actually has agents in it — measured, not assumed.
 //
@@ -30,9 +30,9 @@ await runScript(
     const XP_GOODS = /(ore$|^logs$|oak logs|willow logs|^raw |bar$|^bones$|big bones)/i;
 
     const ADS = [
-      "trading cowhides and bones -- want any ore / logs / raw fish",
-      "free hides for your spare ores! barter only, no coins",
-      "mule open for business: goods for goods, anything considered",
+      "TOOL DESK: axes picks hammers tinderboxes nets -- trade anything",
+      "died and lost your tools? we have them. goods or coins accepted",
+      "hides bones and TOOLS in stock -- the swarm supplies the swarm",
     ];
     let adIdx = 0;
 
@@ -43,7 +43,7 @@ await runScript(
     }
 
     async function scavenge(minItems: number, maxTicks: number) {
-      console.log("[MULE] Scavenging cow field drops");
+      console.log("[GTMULE] Scavenging cow field drops");
       await bot.walkTo(COW_FIELD.x, COW_FIELD.z);
       let ticks = 0;
       while (sdk.getInventory().length < minItems && ticks < maxTicks) {
@@ -59,7 +59,7 @@ await runScript(
         ticks++;
         await bot.dismissBlockingUI();
       }
-      console.log(`[MULE] Scavenged, inv=${sdk.getInventory().length}`);
+      console.log(`[GTMULE] Scavenged, inv=${sdk.getInventory().length}`);
     }
 
     async function surveyHubs(): Promise<{ name: string; x: number; z: number }> {
@@ -69,13 +69,13 @@ await runScript(
         await bot.walkTo(hub.x, hub.z);
         await sdk.waitForTicks(4);
         const n = sdk.getState()?.nearbyPlayers?.length ?? 0;
-        console.log(`[MULE] HUB-SURVEY ${hub.name}: ${n} players`);
+        console.log(`[GTMULE] HUB-SURVEY ${hub.name}: ${n} players`);
         if (n > bestCount) {
           bestCount = n;
           best = hub;
         }
       }
-      console.log(`[MULE] Parking at ${best.name} (${bestCount} players)`);
+      console.log(`[GTMULE] Parking at ${best.name} (${bestCount} players)`);
       return best;
     }
 
@@ -92,20 +92,20 @@ await runScript(
         accept: (theirOffer) => theirOffer.length > 0, // any goods beat junk
         onTrade: (t) =>
           console.log(
-            `[MULE] TRADE with ${t.partner}: gave ${t.gave.length} items, got ${t.received
+            `[GTMULE] TRADE with ${t.partner}: gave ${t.gave.length} items, got ${t.received
               .map((r) => r.name)
               .join(",") || "nothing"}`
           ),
         timeout: minutes * 60_000,
       });
       if (res.trades.length)
-        console.log(`[MULE] ${res.trades.length} trades completed this cycle`);
+        console.log(`[GTMULE] ${res.trades.length} trades completed this cycle`);
     }
 
     async function deliverToKing() {
       const goods = sdk.getInventory().filter((i) => XP_GOODS.test(i.name));
       if (goods.length === 0) return;
-      console.log(`[MULE] Delivering ${goods.length} XP goods to the king`);
+      console.log(`[GTMULE] Delivering ${goods.length} XP goods to the king`);
       await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
       try {
         await bot.trade(/king/i, {
@@ -116,7 +116,7 @@ await runScript(
     }
 
     // ═══════════════════════════════════════════════════════
-    console.log("[MULE] Merchant minion reporting for duty");
+    console.log("[GTMULE] Merchant minion reporting for duty");
     await sdk.say("the merchant guild is open");
 
     let hub = await surveyHubs();
@@ -124,7 +124,7 @@ await runScript(
 
     while (true) {
       if (!(await isAlive())) {
-        console.log("[MULE] Death detected — recovering");
+        console.log("[GTMULE] Death detected — recovering");
         await sdk.waitForTicks(5);
         continue;
       }
@@ -135,6 +135,13 @@ await runScript(
 
       await bot.walkTo(hub.x, hub.z);
       await hawk(6);
+
+      // Productive idle: the hub is full of men — mint a little between
+      // trade windows instead of standing pure-idle.
+      for (let i = 0; i < 15; i++) {
+        try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
+        await bot.dismissBlockingUI();
+      }
 
       await deliverToKing();
 

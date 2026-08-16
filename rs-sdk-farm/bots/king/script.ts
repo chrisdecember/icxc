@@ -599,11 +599,31 @@ await runScript(
           }
         }
 
-        // Fight a cow
-        const cow = sdk.findNearbyNpc(/^cow$/i);
-        if (cow) {
+        // Level-matched targets: cows are level 2 — at Attack 40+ the real
+        // XP is Varrock south-gate guards (level 21, 22-50 HP each, and they
+        // drop bones + iron ore). XP scales with damage dealt, so bigger
+        // targets are strictly better once we one-combo cows.
+        const GUARD_SPOT = { x: 3207, z: 3377 };
+        const atkNow = sdk.getSkill("Attack")?.level ?? 1;
+        const huntGuards = atkNow >= 40;
+        if (huntGuards) {
+          const st6 = sdk.getState();
+          if (
+            st6?.player &&
+            Math.abs(st6.player.worldX - GUARD_SPOT.x) +
+              Math.abs(st6.player.worldZ - GUARD_SPOT.z) >
+              25
+          ) {
+            console.log("[KING] Marching to the Varrock guards");
+            await bot.walkTo(GUARD_SPOT.x, GUARD_SPOT.z);
+          }
+        }
+        const target = huntGuards
+          ? sdk.findNearbyNpc(/^guard$/i) ?? sdk.findNearbyNpc(/^man$/i)
+          : sdk.findNearbyNpc(/^cow$/i);
+        if (target) {
           try {
-            await bot.attack(cow);
+            await bot.attack(target);
           } catch (_) {}
           await sdk.waitForTicks(4);
           totalKills++;
@@ -614,6 +634,14 @@ await runScript(
           updateCombatStyle();
         } else {
           await sdk.waitForTicks(2);
+        }
+
+        // Fletch delivered logs between kills — 375 XP per log, instant.
+        if (totalKills % 4 === 0 && sdk.findInventoryItem(/knife/i)) {
+          if (sdk.findInventoryItem(/^logs$|oak logs|willow logs/i)) {
+            try { await bot.fletchLogs(); } catch (_) {}
+            await bot.dismissBlockingUI();
+          }
         }
 
         // Pick up and bury bones for Prayer XP
