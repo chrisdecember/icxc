@@ -235,6 +235,26 @@ await runScript(
         await walkWaypoints(SAFE_TO_DRAYNOR);
         continue;
       }
+      // A Dark wizard wanders onto the fishing spot (forensics: died at the
+      // spot with one in range). Dodge north and regen instead of dying —
+      // a dodge costs ~2 min, a death costs ~8.
+      {
+        const st = sdk.getState();
+        const wizardNear = (st?.nearbyNpcs ?? []).some((n: any) =>
+          /dark wizard/i.test(n.name)
+        );
+        if (st?.player && wizardNear && st.player.hp <= 6) {
+          console.log("[NETTER] Dark wizard close on low HP — dodging north");
+          await bot.walkTo(3092, 3245);
+          while (true) {
+            const s = sdk.getState()?.player;
+            if (!s || s.hp >= 9) break;
+            await sdk.waitForTicks(20);
+          }
+          await bot.walkTo(DRAYNOR_FISH.x, DRAYNOR_FISH.z);
+          continue;
+        }
+      }
       await fishOneTick();
       await correctDrift();
     }
