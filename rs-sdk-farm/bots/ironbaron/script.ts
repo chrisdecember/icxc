@@ -108,56 +108,24 @@ await runScript(
       }
     }
 
-    async function unload() {
-      console.log(`[IRONMN] Full load, delivery #${++deliveries}`);
-      await walkWaypoints(WAYPOINTS_TO_LUMBRIDGE);
-      await sdk.say("iron baron: iron ore for trade, goods only");
+    // Audit finding: the KING never smiths mid-combat-phase, so the old
+    // Lumbridge delivery run ended in serveTrades timeouts and DROPPING
+    // iron on the ground. Bank everything at Varrock East (80 tiles from
+    // the SE mine) — banked ore is the merch inventory for later.
+    const VARROCK_EAST_BANK = { x: 3253, z: 3420 };
 
-      // Offer to the KING first (smelting XP), else hawk briefly, else drop copper/tin
-      let delivered = false;
-      const king = sdk.findNearbyPlayer(/king/i);
-      if (king) {
-        try {
-          const r = await bot.trade(king, {
-            give: [{ name: /ore/i, amount: -1 }],
-            timeout: 30_000,
-          });
-          delivered = r.success;
-        } catch (_) {}
+    async function unload() {
+      console.log(`[IRONMN] Full load, delivery #${++deliveries} — banking at Varrock East`);
+      await bot.walkTo(VARROCK_EAST_BANK.x, VARROCK_EAST_BANK.z);
+      try {
+        await bot.openBank();
+        await bot.depositItem(/ore/i, -1);
+        await bot.closeBank();
+        console.log(`[IRONMN] STOCKPILE delivery #${deliveries} banked`);
+      } catch (e) {
+        console.log(`[IRONMN] Bank failed: ${(e as Error).message}`);
       }
-      if (!delivered) {
-        // KING may be at the furnace smelting rather than the courtyard.
-        await bot.walkTo(3225, 3256);
-        const kingAtFurnace = sdk.findNearbyPlayer(/king/i);
-        if (kingAtFurnace) {
-          try {
-            const r = await bot.trade(kingAtFurnace, {
-              give: [{ name: /ore/i, amount: -1 }],
-              timeout: 30_000,
-            });
-            delivered = r.success;
-          } catch (_) {}
-        }
-      }
-      if (!delivered) {
-        await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
-        try {
-          await bot.serveTrades({
-            give: [{ name: /iron ore/i, amount: -1 }],
-            accept: (offer) => offer.length > 0,
-            timeout: 90_000,
-            maxTrades: 3,
-          });
-        } catch (_) {}
-        try { await bot.dropItem(/copper ore/i, "all"); } catch (_) {}
-        try { await bot.dropItem(/tin ore/i, "all"); } catch (_) {}
-        // No buyers: shed iron down to a small hawking reserve so the pack
-        // never stays full — a full pack means zero mining forever.
-        while (sdk.countInventoryItems(/iron ore/i) > 10) {
-          try { await bot.dropItem(/iron ore/i, 1); } catch (_) { break; }
-        }
-      }
-      await walkWaypoints(WAYPOINTS_TO_MINE);
+      // Main loop walks us back to the mine site.
     }
 
     // ═══════════════════════════════════════════════════════

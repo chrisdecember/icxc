@@ -34,7 +34,9 @@ await runScript(
       if (sdk.countInventoryItems(/coins/i) >= target) return;
       console.log("[VAULT] Building coin float");
       await bot.walkTo(3213, 3428);
-      for (let i = 0; i < 120 && sdk.countInventoryItems(/coins/i) < target; i++) {
+      // Short batches only (25 tries) — the vault's first job is sweeping
+      // law piles before they despawn, not maximizing pick throughput.
+      for (let i = 0; i < 25 && sdk.countInventoryItems(/coins/i) < target; i++) {
         try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
         await bot.dismissBlockingUI();
       }
@@ -107,7 +109,12 @@ await runScript(
       // Lumbridge mules where the only traffic actually is.
       await hooverPiles();
       await bankIfFull();
-      // Stay put and keep hoovering — the swarm/blades drop here.
+      if (!sdk.findGroundItem(/law rune/i)) {
+        // Productive idle while the swarm ramps: short pickpocket batches
+        // at Varrock center (Thieving XP + coin float), then hurry back —
+        // capped small so law piles never despawn waiting on us.
+        await earnFloat(sdk.countInventoryItems(/coins/i) + 30);
+      }
       await sdk.waitForTicks(4);
     }
   },

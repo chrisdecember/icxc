@@ -149,7 +149,16 @@ class LawBot {
         if (!state?.player) return;
 
         if (this.client.isDialogOpen()) {
-            this.exec({ type: 'clickDialogOption', optionIndex: 0, reason: 'dismiss' });
+            // Smart selection (ported from sdk skipTutorial): prefer the
+            // skip/yes/confirm option so the tutorial-guide dialog actually
+            // skips instead of whatever sits at index 0.
+            const opts = (state as any).dialog?.options ?? [];
+            const best =
+                opts.find((o: any) => /skip|complete|finish/i.test(o.text)) ??
+                opts.find((o: any) => /yes|continue|proceed/i.test(o.text)) ??
+                opts.find((o: any) => /confirm|accept|agree|ok/i.test(o.text)) ??
+                opts[0];
+            this.exec({ type: 'clickDialogOption', optionIndex: best?.index ?? 0, reason: 'dialog' });
             return;
         }
         if (this.client.isModalOpen()) {
@@ -207,6 +216,25 @@ class LawBot {
         const px = state.player.worldX;
         const pz = state.player.worldZ;
         this.px = px; this.pz = pz;
+
+        // Tutorial Island (x<3170, z<3145): the lite path never ported
+        // bot.skipTutorial(), so every unit froze here — mainland walkTo is
+        // out_of_range from the island. ROOT CAUSE of the stuck swarm.
+        // Talk to the guide; the dialog handler above picks skip/yes.
+        if (px < 3170 && pz < 3145) {
+            const guide = state.nearbyNpcs.find(n =>
+                /runescape guide|guide|instructor|tutorial/i.test(n.name));
+            const talk = guide?.optionsWithIndex.find(o => /talk/i.test(o.text));
+            if (guide && talk) {
+                this.exec({ type: 'interactNpc', npcIndex: guide.index, optionIndex: talk.opIndex, reason: 'skip-tutorial' });
+                this.waitTicks = 3;
+            } else {
+                this.lastFailure = 'tutorial:no-guide-in-range';
+                this.waitTicks = 5;
+            }
+            return;
+        }
+
         const ramping = this.cl < RAMP_UNTIL;
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const anchor = ramping ? COWS : iceTier ? ICE_SITE : this.site;

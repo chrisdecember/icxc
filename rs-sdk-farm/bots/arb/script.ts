@@ -102,12 +102,12 @@ await runScript(
         continue;
       }
 
-      if (sdk.countInventoryItems(/coins/i) < 40) {
-        await earnCoins(60);
-      }
-
       await sweepNets();
-      await sellAtCounter(5);
+      await sellAtCounter(2);
+      // Productive idle: audit caught ARB at 0 XP/30min waiting on trades
+      // that rarely come. Always grind a pickpocket batch between counter
+      // windows — Thieving XP + float, and we're still at the shop door.
+      await earnCoins(sdk.countInventoryItems(/coins/i) + 40);
     }
   },
   { timeout: 86_400_000 }

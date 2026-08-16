@@ -1,14 +1,15 @@
 import { runScript } from "../../sdk/runner";
 
-// FINGERS v4 — THE KNIGHT'S PURSE. Thieving 99: Knights of Ardougne are
-// the endgame pickpocket (~50gp/pick vs 3gp from men — 16x the mint
-// rate, near-perfect success at 99). No skillcape exists on this 2004
-// server (checked the item data), and the gem stall is off-limits by
-// order — knights only.
+// FINGERS v5 — THE KNIGHT'S PURSE, sustainable edition. Thieving 99:
+// Knights of Ardougne are the endgame pickpocket (~50gp/pick vs 3gp from
+// men). No skillcape on this 2004 server; gem stall off-limits by order.
 //
-// Coins stack as one slot and survive death (most-valuable-3 rule), so
-// the war chest rides along. HP is tiny — rest-regen keeps the rare
-// failed-pick stuns from adding up.
+// The commute was the killer, not the market: the old coast waypoints ran
+// through the hobgoblin peninsula (2900,3290) — death — and the restart
+// repathed over White Wolf Mountain with no rest, at 2hp. Ardougne has
+// exactly one land approach (Taverley -> White Wolf -> Catherby), so v5
+// crosses it deliberately: rest to near-full at Taverley, sprint the wolf
+// pass without stopping, recover at Catherby.
 
 await runScript(
   async (ctx) => {
@@ -16,14 +17,16 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    // Coarse east->west hops; the pathfinder owns the details.
+    // The real road. rest=true means: safe ground, wait for HP before the
+    // next leg. The (2850,3487) pass tile is empirically walkable (metrics
+    // caught us standing on it) — it's the wolf zone, never rest there.
     const ROUTE_WEST = [
-      { x: 3092, z: 3245 }, // Draynor
-      { x: 3000, z: 3235 },
-      { x: 2900, z: 3290 },
-      { x: 2800, z: 3300 },
-      { x: 2700, z: 3305 },
-      { x: 2661, z: 3305 }, // East Ardougne market
+      { x: 3092, z: 3245, rest: false }, // Draynor
+      { x: 2965, z: 3335, rest: false }, // Falador south road (skirts hobgoblin peninsula)
+      { x: 2895, z: 3455, rest: true },  // Taverley — rest up before the pass
+      { x: 2850, z: 3487, rest: false }, // White Wolf pass — KEEP MOVING
+      { x: 2804, z: 3433, rest: true },  // Catherby — recover after the pass
+      { x: 2661, z: 3305, rest: false }, // East Ardougne market
     ];
     const MARKET = { x: 2661, z: 3305 };
     const KNIGHT = /knight of ardougne|^knight$/i;
@@ -39,16 +42,39 @@ await runScript(
 
     const ARDY_BANK = { x: 2657, z: 3283 };
 
-    async function walkWest() {
-      console.log("[FINGERS] Marching west to Ardougne");
-      const cur = sdk.getState()?.player;
-      for (const p of ROUTE_WEST) {
-        // Never backtrack east after a mid-route restart.
-        if (cur && p.x > cur.worldX + 30) continue;
-        await bot.walkTo(p.x, p.z);
+    // Regen is ~1hp/min; a few minutes parked in Taverley beats a corpse
+    // run from Lumbridge. Eats food first if we happen to hold any.
+    async function restUntilHp(frac: number, maxTicks = 900) {
+      for (let t = 0; t < maxTicks; t += 20) {
         const st = sdk.getState()?.player;
-        if (st) console.log(`[FINGERS] waypoint (${st.worldX},${st.worldZ})`);
+        if (!st || st.hp <= 0 || st.hp >= st.maxHp * frac) return;
+        const food = sdk.findInventoryItem(/cake|bread/i);
+        if (food) {
+          try { await bot.eatFood(food); } catch (_) {}
+        }
+        if (t === 0) console.log(`[FINGERS] Resting (${st.hp}/${st.maxHp} hp)`);
+        await sdk.waitForTicks(20);
       }
+    }
+
+    // Returns false if we died on the road — caller restarts the march.
+    async function walkWest(): Promise<boolean> {
+      console.log("[FINGERS] Marching west (Falador road -> Taverley -> wolf pass -> Catherby)");
+      for (const p of ROUTE_WEST) {
+        const st = sdk.getState()?.player;
+        if (!st || st.hp <= 0) return false;
+        // Skip waypoints already east of us (fresh read each leg — the old
+        // one-time read kept stale positions across a mid-march death).
+        if (p.x > st.worldX + 30) continue;
+        try { await bot.walkTo(p.x, p.z); } catch (e) {
+          console.log(`[FINGERS] Leg to (${p.x},${p.z}) failed: ${(e as Error).message}`);
+        }
+        const now = sdk.getState()?.player;
+        if (!now || now.hp <= 0) return false;
+        console.log(`[FINGERS] waypoint (${now.worldX},${now.worldZ}) hp=${now.hp}`);
+        if (p.rest) await restUntilHp(0.85);
+      }
+      return true;
     }
 
     // Coins do NOT survive death on this server (measured: the KING died
@@ -90,14 +116,18 @@ await runScript(
     async function eatOrStealIfLow() {
       const st = sdk.getState()?.player;
       if (!st) return;
-      if (st.hp < st.maxHp * 0.5) {
+      // Sustainable farm rule: eat EARLY (70%) — knight stuns chip 3hp and
+      // max HP here is tiny; waiting for 50% was the death-cycle.
+      if (st.hp < st.maxHp * 0.7) {
         const food = sdk.findInventoryItem(/cake|bread/i);
         if (food) {
           try { await bot.eatFood(food); } catch (_) {}
-        } else {
-          console.log("[FINGERS] Low HP — raiding the baker's stall");
-          await stealCakes(3);
         }
+      }
+      // Proactive stocking: never work the square with fewer than 2 cakes.
+      if (sdk.countInventoryItems(/cake|bread/i) < 2) {
+        console.log("[FINGERS] Restocking cakes from the baker's stall");
+        await stealCakes(4);
       }
     }
 
@@ -107,16 +137,19 @@ await runScript(
       `[FINGERS] v4: Knight's Purse expedition — departing with ${startCoins}gp`
     );
     await sdk.say("the mint rides west. knights of ardougne await");
-    await walkWest();
+    while (!(await walkWest())) {
+      console.log("[FINGERS] Died on the road — waiting for respawn, remarching");
+      await sdk.waitForTicks(10);
+    }
     await bankTreasury(); // secure the war chest before the first pick
 
     while (true) {
       if (!(await isAlive())) {
-        console.log(
-          `[FINGERS] Death — coins survive (${sdk.countInventoryItems(/coins/i)}gp). Marching back west`
-        );
-        await sdk.waitForTicks(5);
-        await walkWest();
+        console.log("[FINGERS] Death — treasury is banked, only pocket change lost. Remarching");
+        await sdk.waitForTicks(10);
+        while (!(await walkWest())) {
+          await sdk.waitForTicks(10);
+        }
         continue;
       }
 
@@ -127,8 +160,9 @@ await runScript(
         picks++;
         if (picks % 50 === 0) {
           const coins = sdk.countInventoryItems(/coins/i);
+          const cakes = sdk.countInventoryItems(/cake|bread/i);
           console.log(
-            `[FINGERS] KNIGHT-PURSE ${picks} picks, ${coins}gp on hand`
+            `[FINGERS] KNIGHT-PURSE ${picks} picks, ${coins}gp on hand, ${cakes} food`
           );
           await bankTreasury();
         }
