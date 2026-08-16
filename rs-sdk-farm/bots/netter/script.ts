@@ -39,6 +39,8 @@ await runScript(
 
     let deliveries = 0;
     let totalFishCaught = 0;
+    let lastPos = { x: 0, z: 0 };
+    let lastNpcs: string[] = [];
 
     async function walkWaypoints(points: { x: number; z: number }[]) {
       for (const p of points) {
@@ -77,7 +79,9 @@ await runScript(
     }
 
     async function recoverFromDeath() {
-      console.log("[NETTER] Death detected — recovering");
+      console.log(
+        `[NETTER] Death detected — last seen at (${lastPos.x},${lastPos.z}) near [${lastNpcs.join(",")}] — recovering`
+      );
       await sdk.waitForTicks(5);
       await ensureNet();
     }
@@ -219,6 +223,13 @@ await runScript(
         continue;
       }
 
+      {
+        const st = sdk.getState();
+        if (st?.player) {
+          lastPos = { x: st.player.worldX, z: st.player.worldZ };
+          lastNpcs = [...new Set((st.nearbyNpcs ?? []).map((n: any) => n.name))].slice(0, 6) as string[];
+        }
+      }
       if (!sdk.findInventoryItem(/fishing net/i)) {
         await ensureNet();
         await walkWaypoints(SAFE_TO_DRAYNOR);
