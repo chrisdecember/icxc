@@ -54,6 +54,7 @@ class LawBot {
     private lastAttackTick = -99;
     private busy = false;
     private xpBase = -1;
+    private designTicks = 0;
     lastFailure = '';
 
     laws = 0;
@@ -62,6 +63,8 @@ class LawBot {
     relogins = 0;
     cl = 1;
     hp = 10;
+    px = 0;
+    pz = 0;
 
     constructor(
         readonly name: string,
@@ -130,10 +133,21 @@ class LawBot {
             return;
         }
         if (this.client.isModalOpen()) {
-            const shopOpen = !!(this.collector.collectState(this.tick, true) as any)?.shop?.items?.length;
+            const modalState = this.collector.collectState(this.tick, true) as any;
+            const shopOpen = !!modalState?.shop?.items?.length;
             if (!shopOpen) {
-                this.exec({ type: 'acceptCharacterDesign', reason: 'first login' });
-                this.exec({ type: 'closeModal', reason: 'unblock' });
+                // Character-design (interface 3559) needs randomize THEN accept
+                // on SEPARATE ticks — firing both together never dismisses it,
+                // which froze the whole swarm at creation (cl=3, 0 xp).
+                this.designTicks++;
+                if (this.designTicks === 1) {
+                    this.exec({ type: 'randomizeCharacterDesign', reason: 'design' });
+                } else if (this.designTicks <= 4) {
+                    this.exec({ type: 'acceptCharacterDesign', reason: 'design' });
+                } else {
+                    this.exec({ type: 'closeModal', reason: 'unblock' });
+                    this.designTicks = 0;
+                }
                 return;
             }
         }
@@ -172,6 +186,7 @@ class LawBot {
 
         const px = state.player.worldX;
         const pz = state.player.worldZ;
+        this.px = px; this.pz = pz;
         const ramping = this.cl < RAMP_UNTIL;
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const anchor = ramping ? COWS : iceTier ? ICE_SITE : this.site;
@@ -359,7 +374,7 @@ const report = setInterval(() => {
     );
     for (const b of bots) {
         console.log(
-            `[lawswarm]   ${b.name} cl=${b.cl} hp=${b.hp} laws=${b.laws} xp=${b.xpGained} deaths=${b.deaths} ${b.online ? '' : 'OFFLINE'}`
+            `[lawswarm]   ${b.name} cl=${b.cl} hp=${b.hp} laws=${b.laws} xp=${b.xpGained} deaths=${b.deaths} pos=(${b.px},${b.pz}) ${b.lastFailure || ''} ${b.online ? '' : 'OFFLINE'}`
         );
     }
 }, 120_000);
