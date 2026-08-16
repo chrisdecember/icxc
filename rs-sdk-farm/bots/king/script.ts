@@ -7,6 +7,7 @@ import { runScript } from "../../sdk/runner";
 await runScript(
   async (ctx) => {
     const { bot, sdk } = ctx;
+    try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
     // ─── Constants ───────────────────────────────────────

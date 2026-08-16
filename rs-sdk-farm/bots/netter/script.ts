@@ -8,6 +8,7 @@ import { runScript } from "../../sdk/runner";
 await runScript(
   async (ctx) => {
     const { bot, sdk } = ctx;
+    try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
     const MEETING_POINT = { x: 3222, z: 3218 };
@@ -40,7 +41,8 @@ await runScript(
 
     async function isAlive() {
       const state = sdk.getState();
-      return state?.player && state.player.hp > 0;
+      if (!state?.player) return true; // state not loaded is not death
+      return state.player.hp > 0;
     }
 
     async function recoverFromDeath() {
