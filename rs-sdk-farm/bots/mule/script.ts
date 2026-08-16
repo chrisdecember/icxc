@@ -142,5 +142,5 @@ await runScript(
       if (cycles % 4 === 0) hub = await surveyHubs(); // re-measure the market
     }
   },
-  { timeout: 7_200_000 }
+  { timeout: 86_400_000 }
 );
