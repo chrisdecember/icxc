@@ -52,6 +52,19 @@ const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
 const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|newcomer|bread/i;
 
+// Waypoint chain: tested-walkable tiles from Lumbridge to Varrock circle.
+// Routes EAST of farm fences (z=3260-3310) and picnic bench area (z=3330-3350)
+// to avoid the obstacles that trap BFS-limited lite clients.
+const MARCH_WAYPOINTS = [
+    { x: 3245, z: 3235 },  // NE of Lumbridge, open ground
+    { x: 3260, z: 3255 },  // East, clear of farm gate at (3213,3261)
+    { x: 3260, z: 3300 },  // North along east corridor
+    { x: 3265, z: 3340 },  // Past farm fence clusters
+    { x: 3270, z: 3358 },  // Further east to bypass z=3355 fence barrier
+    { x: 3270, z: 3375 },  // North past all barriers
+    { x: 3235, z: 3374 },  // West approach to circle
+];
+
 class LawBot {
     private session: LiteSession | null = null;
     private client: LiteClient | null = null;
@@ -71,6 +84,7 @@ class LawBot {
     private staleX = -1;
     private staleZ = -1;
     private staleSince = 0;
+    private marchWp = -1;
 
     laws = 0;
     xpGained = 0;
@@ -109,7 +123,11 @@ class LawBot {
     }
 
     get stale(): boolean {
-        return this.tick - this.staleSince > 200 && this.staleSince > 0;
+        return this.tick - this.staleSince > 500 && this.staleSince > 0;
+    }
+
+    resetRoute(): void {
+        this.marchWp = -1;
     }
 
     forceDisconnect(): void {
@@ -150,17 +168,25 @@ class LawBot {
         return xp;
     }
 
-    private walkToward(px: number, pz: number, tx: number, tz: number, reason: string): void {
+    private walkToward(px: number, pz: number, tx: number, tz: number, reason: string): boolean {
         const dx = tx - px, dz = tz - pz;
         const dist = Math.hypot(dx, dz);
-        const STEP = 5; // lite BFS build-area is bounded; tiny hops avoid out_of_range
-        if (dist <= STEP) {
-            this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason });
-        } else {
-            const nx = Math.round(px + (dx / dist) * STEP);
-            const nz = Math.round(pz + (dz / dist) * STEP);
-            this.exec({ type: 'walkTo', x: nx, z: nz, running: true, reason: reason + '-hop' });
+        if (dist < 1) return true;
+        const STEP = Math.min(5, Math.max(2, Math.floor(dist)));
+        const ndx = dx / dist, ndz = dz / dist;
+        // Try direct, then rotated angles (±23°, ±45°, ±68°, ±90°, reverse)
+        const angles = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, Math.PI / 2, -Math.PI / 2];
+        for (const angle of angles) {
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            const rx = ndx * cos - ndz * sin;
+            const rz = ndx * sin + ndz * cos;
+            const nx = Math.round(px + rx * STEP);
+            const nz = Math.round(pz + rz * STEP);
+            if (nx === px && nz === pz) continue;
+            this.exec({ type: 'walkTo', x: nx, z: nz, running: true, reason });
+            if (!this.lastFailure) return true;
         }
+        return false;
     }
 
     private async onTick(): Promise<void> {
@@ -325,19 +351,28 @@ class LawBot {
                 const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: reachableClosed.x, z: reachableClosed.z, locId: reachableClosed.id, optionIndex: opt.opIndex, reason: 'gate-open' });
                 console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z})`);
-                this.waitTicks = 1;
+                this.waitTicks = 2;
                 this.lastFailure = '';
                 this.escapeTries = 0;
+                // Walk THROUGH the gate: aim for the tile on the far side (away from bot)
+                const gx = reachableClosed.x + Math.sign(reachableClosed.x - px);
+                const gz = reachableClosed.z + Math.sign(reachableClosed.z - pz);
+                this.exec({ type: 'walkTo', x: gx, z: gz, running: true, reason: 'gate-through' });
                 return;
             }
 
+            // Use waypoint target for escape direction when marching
+            const wpIdx = this.marchWp >= 0 && this.marchWp < MARCH_WAYPOINTS.length
+                ? this.marchWp : -1;
+            const escTarget = wpIdx >= 0 ? MARCH_WAYPOINTS[wpIdx] : anchor;
+            const toDist = Math.hypot(escTarget.x - px, escTarget.z - pz);
             let dx: number, dz: number;
-            const toDist = Math.hypot(anchor.x - px, anchor.z - pz);
-            if (!ramping && toDist > 14) {
-                // Bias jitter toward station with wobble to dodge obstacles
-                const step = 3 + this.escapeTries % 3;
-                const nx = (anchor.x - px) / toDist, nz = (anchor.z - pz) / toDist;
-                const wobble = ((this.tick + this.escapeTries) % 3 - 1) * 0.6;
+            if (!ramping && toDist > 5) {
+                const step = 3 + this.escapeTries % 4;
+                const nx = (escTarget.x - px) / toDist, nz = (escTarget.z - pz) / toDist;
+                // Cycle through different wobble angles to probe around obstacles
+                const wobblePhase = this.escapeTries % 7;
+                const wobble = (wobblePhase - 3) * 0.5;
                 dx = Math.round((nx + wobble * nz) * step);
                 dz = Math.round((nz - wobble * nx) * step);
             } else {
@@ -446,27 +481,30 @@ class LawBot {
             return;
         }
         if (!target && !ramping && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
-            const useEastCorridor = pz < 3350 && px < 3245;
-            const marchTo = useEastCorridor ? { x: 3258, z: Math.min(pz + 3, anchor.z) } : anchor;
+            // Waypoint-based march: follow a tested route east of obstacles.
+            if (this.marchWp < 0) {
+                let bestDist = Infinity, bestIdx = 0;
+                for (let i = 0; i < MARCH_WAYPOINTS.length; i++) {
+                    const d = Math.hypot(px - MARCH_WAYPOINTS[i].x, pz - MARCH_WAYPOINTS[i].z);
+                    if (d < bestDist) { bestDist = d; bestIdx = i; }
+                }
+                this.marchWp = bestDist < 12 ? Math.min(bestIdx + 1, MARCH_WAYPOINTS.length) : bestIdx;
+            }
+            const wpIdx = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
+            const wp = this.marchWp >= MARCH_WAYPOINTS.length ? anchor : MARCH_WAYPOINTS[wpIdx];
+            const distToWp = Math.hypot(px - wp.x, pz - wp.z);
+
+            if (distToWp < 10 && this.marchWp < MARCH_WAYPOINTS.length) {
+                this.marchWp++;
+                console.log(`[${this.name}] WAYPOINT ${this.marchWp}/${MARCH_WAYPOINTS.length} reached at (${px},${pz})`);
+            }
+
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
-            if (this.tick % 80 === 0) {
-                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} to ${this.site.name}${useEastCorridor ? ' [east]' : ''}`);
+            if (this.tick % 60 === 0) {
+                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length}`);
             }
-            const tdx = Math.sign(marchTo.x - px);
-            const tdz = Math.sign(marchTo.z - pz);
-            const dirs = [
-                [tdx, tdz], [0, tdz], [tdx, 0],
-                [-tdx, tdz], [tdx, -tdz],
-                [-tdx, 0], [0, -tdz],
-            ].filter(d => d[0] !== 0 || d[1] !== 0);
-            let stepped = false;
-            for (const [sx, sz] of dirs) {
-                this.exec({ type: 'walkTo', x: px + sx, z: pz + sz, reason: 'micro' });
-                if (!this.lastFailure) { stepped = true; break; }
-            }
-            if (!stepped) {
-                this.walkToward(px, pz, marchTo.x, marchTo.z, 'station');
-            }
+
+            this.walkToward(px, pz, wp.x, wp.z, 'march');
             this.waitTicks = 2;
             return;
         }
@@ -579,9 +617,8 @@ const report = setInterval(() => {
     }
     for (const bot of bots) {
         if (bot.stale && bot.online) {
-            console.warn(`[lawswarm] ${bot.name} STALE-RELOG at (${bot.px},${bot.pz}) — respawn fresh`);
-            bot.forceDisconnect();
-            void relogin(bot);
+            console.warn(`[lawswarm] ${bot.name} STALE at (${bot.px},${bot.pz}) — route reset`);
+            bot.resetRoute();
         }
     }
 }, 120_000);
