@@ -57,11 +57,11 @@ const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|new
 // to avoid the obstacles that trap BFS-limited lite clients.
 const MARCH_WAYPOINTS = [
     { x: 3245, z: 3235 },  // NE of Lumbridge, open ground
-    { x: 3260, z: 3255 },  // East, clear of farm gate at (3213,3261)
-    { x: 3260, z: 3300 },  // North along east corridor
-    { x: 3265, z: 3340 },  // Past farm fence clusters
-    { x: 3270, z: 3358 },  // Further east to bypass z=3355 fence barrier
-    { x: 3270, z: 3375 },  // North past all barriers
+    { x: 3265, z: 3255 },  // East, clear of farm gate at (3213,3261)
+    { x: 3275, z: 3300 },  // North along east corridor (well east of cabbage patch)
+    { x: 3282, z: 3340 },  // Well east of all fence clusters
+    { x: 3285, z: 3365 },  // Far east, clear of bullrush/tree barrier at z≈3355
+    { x: 3280, z: 3380 },  // North past all barriers
     { x: 3235, z: 3374 },  // West approach to circle
 ];
 
@@ -245,6 +245,7 @@ class LawBot {
 
         if (this.seenHp && hp - this.lastHp >= 3) {
             this.deaths++;
+            this.marchWp = -1;
             console.log(`[${this.name}] death #${this.deaths} (laws held: ${this.laws})`);
         }
         this.lastHp = hp;
@@ -345,7 +346,8 @@ class LawBot {
 
             const closedGates = (state.nearbyLocs ?? []).filter(l =>
                 /door|gate/i.test(l.name) &&
-                l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
+                l.optionsWithIndex.some(o => /^open$/i.test(o.text)) &&
+                Math.hypot(l.x - px, l.z - pz) <= 6);
             const reachableClosed = closedGates.find(g => g.reachable === true);
             if (reachableClosed) {
                 const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
@@ -481,6 +483,18 @@ class LawBot {
             return;
         }
         if (!target && !ramping && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
+            // Lumbridge-escape: bots trapped in buildings/cabbage (west of x=3240,
+            // south of z=3260) force-walk east before following waypoints.
+            if (px < 3240 && pz > 3150 && pz < 3345) {
+                const eastTarget = { x: 3255, z: Math.max(pz, 3240) };
+                if (this.tick % 60 === 0) {
+                    console.log(`[${this.name}] LUMBRIDGE-ESCAPE (${px},${pz}) -> east`);
+                }
+                this.walkToward(px, pz, eastTarget.x, eastTarget.z, 'lumbridge-escape');
+                this.marchWp = -1;
+                this.waitTicks = 2;
+                return;
+            }
             // Waypoint-based march: follow a tested route east of obstacles.
             if (this.marchWp < 0) {
                 let bestDist = Infinity, bestIdx = 0;
