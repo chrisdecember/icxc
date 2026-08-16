@@ -52,13 +52,14 @@ await runScript(
       return state.player.hp > 0;
     }
 
-    async function recoverFromDeath() {
-      console.log("[NETTER] Death detected — recovering");
-      await sdk.waitForTicks(5);
-      // Death strips the net — without this check the fisher casts nothing
-      // forever. Earn 30gp and rebuy at Gerrant's if it's gone.
-      if (!sdk.findInventoryItem(/fishing net/i)) {
-        console.log("[NETTER] Net lost to death — rebuying at Port Sarim");
+    // Death strips the net — without this the fisher casts nothing forever.
+    // Retries until a net is actually in the pack (a single silent shop
+    // failure previously left it netless at the spot with an empty pack).
+    async function ensureNet() {
+      let tries = 0;
+      while (!sdk.findInventoryItem(/fishing net/i) && tries < 3) {
+        tries++;
+        console.log(`[NETTER] No net — rebuy attempt ${tries} at Port Sarim`);
         await bot.walkTo(3232, 3218);
         for (let i = 0; i < 60 && sdk.countInventoryItems(/coins/i) < 30; i++) {
           try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
@@ -73,6 +74,12 @@ await runScript(
           await bot.closeShop();
         } catch (_) {}
       }
+    }
+
+    async function recoverFromDeath() {
+      console.log("[NETTER] Death detected — recovering");
+      await sdk.waitForTicks(5);
+      await ensureNet();
     }
 
     async function tryTradeToKing(): Promise<boolean> {
@@ -212,6 +219,11 @@ await runScript(
         continue;
       }
 
+      if (!sdk.findInventoryItem(/fishing net/i)) {
+        await ensureNet();
+        await walkWaypoints(SAFE_TO_DRAYNOR);
+        continue;
+      }
       await fishOneTick();
       await correctDrift();
     }
