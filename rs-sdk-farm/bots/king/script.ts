@@ -371,6 +371,21 @@ await runScript(
       await bot.walkTo(LUMBRIDGE_TREES.x, LUMBRIDGE_TREES.z);
 
       for (let i = 0; i < 20; i++) {
+        // A full pack makes every chop a silent no-op (measured stall).
+        // Fletch logs into stackable shafts and shed junk to make room.
+        if (sdk.getInventory().length >= 26) {
+          if (sdk.findInventoryItem(/^logs$|oak logs/i) && sdk.findInventoryItem(/knife/i)) {
+            try { await bot.fletchLogs(); } catch (_) {}
+            await bot.dismissBlockingUI();
+          }
+          for (const junk of [/cowhide/i, /raw beef/i, /^bones$/i, /shrimps? net/i]) {
+            if (sdk.getInventory().length < 26) break;
+            try { await bot.dropItem(junk, "all"); } catch (_) {}
+          }
+          if (sdk.getInventory().length >= 27) {
+            try { await bot.dropItem(/^logs$/i, "all"); } catch (_) {}
+          }
+        }
         const tree = sdk.findNearbyLoc(/^tree$/i);
         if (!tree) {
           await sdk.waitForTicks(3);

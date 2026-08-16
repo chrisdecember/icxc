@@ -19,13 +19,13 @@ while true; do
 
     if ! pgrep -f "lite/runner.ts $name" > /dev/null 2>&1; then
       log "RESTART client $name"
-      ( cd "$ROOT/server/webclient" && nohup "$BUN" src/lite/runner.ts "$name" >> "$ROOT/logs/$name-client.log" 2>&1 & )
+      ( cd "$ROOT/server/webclient" && nohup "$BUN" src/lite/runner.ts "$name" < /dev/null >> "$ROOT/logs/$name-client.log" 2>&1 & )
       sleep 8   # let the client log in before (re)starting the brain
     fi
 
     if ! pgrep -f "bots/$name/script.ts" > /dev/null 2>&1; then
       log "RESTART brain $name"
-      ( cd "$ROOT" && nohup "$BUN" "bots/$name/script.ts" >> "$ROOT/logs/$name.log" 2>&1 & )
+      ( cd "$ROOT" && nohup "$BUN" "bots/$name/script.ts" < /dev/null >> "$ROOT/logs/$name.log" 2>&1 & )
     fi
   done < "$BOTS_FILE"
   sleep 90
