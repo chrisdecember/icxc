@@ -26,6 +26,15 @@ const SITES = [
     { name: 'varrock-circle', x: 3225, z: 3374 },
     { name: 'lumbridge-zone', x: 3220, z: 3222 },
 ];
+// All laws flow through the vault: units drop their stacks here and the
+// gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
+// or bank — the drop-pile pattern is the collector mechanism.)
+const VAULT = { x: 3227, z: 3368 };
+const VAULT_AT = 8; // laws held before a vault run
+// Ice-warrior tier unlocks only after the scout verifies the site.
+const ICE_ENABLED = process.env.ICE === '1';
+const ICE_SITE = { name: 'ice-mountain', x: 3008, z: 3471 };
+const SWORDSHOP = { x: 3203, z: 3397 };
 const RAMP_UNTIL = 16; // avg(atk,str,def,hp) before leaving the cows
 const ATTACK_RETRY_TICKS = 8;
 const RELOGIN_MS = 5_000;
@@ -121,9 +130,12 @@ class LawBot {
             return;
         }
         if (this.client.isModalOpen()) {
-            this.exec({ type: 'acceptCharacterDesign', reason: 'first login' });
-            this.exec({ type: 'closeModal', reason: 'unblock' });
-            return;
+            const shopOpen = !!(this.collector.collectState(this.tick, true) as any)?.shop?.items?.length;
+            if (!shopOpen) {
+                this.exec({ type: 'acceptCharacterDesign', reason: 'first login' });
+                this.exec({ type: 'closeModal', reason: 'unblock' });
+                return;
+            }
         }
 
         const hp = state.skills.find(s => /hitpoint/i.test(s.name))?.level ?? 0;
@@ -161,7 +173,8 @@ class LawBot {
         const px = state.player.worldX;
         const pz = state.player.worldZ;
         const ramping = this.cl < RAMP_UNTIL;
-        const anchor = ramping ? COWS : this.site;
+        const iceTier = ICE_ENABLED && this.cl >= 45;
+        const anchor = ramping ? COWS : iceTier ? ICE_SITE : this.site;
 
         // Rest when low: step off the circle and let regen work.
         if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4)) {
@@ -169,6 +182,59 @@ class LawBot {
                 this.exec({ type: 'walkTo', x: anchor.x + 14, z: anchor.z - 10, running: true, reason: 'rest' });
             }
             this.waitTicks = 40;
+            return;
+        }
+
+        // Vault run: carry the stack to the drop tile; gtvault banks it.
+        if (this.laws >= VAULT_AT) {
+            if (Math.hypot(px - VAULT.x, pz - VAULT.z) > 2) {
+                this.exec({ type: 'walkTo', x: VAULT.x, z: VAULT.z, running: true, reason: 'vault run' });
+                this.waitTicks = 5;
+                return;
+            }
+            const slot = state.inventory.find(i => /law rune/i.test(i.name))?.slot;
+            if (slot !== undefined) {
+                this.exec({ type: 'dropItem', slot, reason: 'VAULT-DROP' });
+                console.log(`[${this.name}] VAULT-DROP ${this.laws} laws`);
+                this.waitTicks = 3;
+                return;
+            }
+        }
+
+        // Gear program: dark-wizard coins buy an iron sword next door.
+        const hasBetterSword = state.inventory.concat((state as any).equipment ?? [])
+            .some(i => /iron sword|steel sword|scimitar/i.test(i.name));
+        const coinsHeld = state.inventory.filter(i => /^coins$/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+        if (!ramping && !hasBetterSword && coinsHeld >= 120) {
+            if (Math.hypot(px - SWORDSHOP.x, pz - SWORDSHOP.z) > 3) {
+                this.exec({ type: 'walkTo', x: SWORDSHOP.x, z: SWORDSHOP.z, running: true, reason: 'gear up' });
+                this.waitTicks = 5;
+                return;
+            }
+            const shop = (state as any).shop;
+            if (!shop || !shop.items?.length) {
+                const keeper = state.nearbyNpcs.find(n => /shop keeper/i.test(n.name));
+                const tradeOpt = keeper?.optionsWithIndex.find(o => /trade/i.test(o.text));
+                if (keeper && tradeOpt) {
+                    this.exec({ type: 'interactNpc', npcIndex: keeper.index, optionIndex: tradeOpt.opIndex, reason: 'open shop' });
+                }
+                this.waitTicks = 4;
+                return;
+            }
+            const sword = shop.items.find((it: any) => /iron sword/i.test(it.name));
+            if (sword) {
+                this.exec({ type: 'shopBuy', slot: sword.slot, amount: 1, reason: 'buy iron sword' });
+                this.waitTicks = 3;
+            }
+            this.exec({ type: 'closeShop', reason: 'done' });
+            return;
+        }
+        const newSword = state.inventory.find(i => /iron sword|steel sword|scimitar/i.test(i.name));
+        if (newSword) {
+            // Wield option is the weapon's first inventory option.
+            this.exec({ type: 'useInventoryItem', slot: newSword.slot, optionIndex: 1, reason: 'GEAR wield' });
+            console.log(`[${this.name}] GEAR wielding ${newSword.name}`);
+            this.waitTicks = 2;
             return;
         }
 
@@ -196,7 +262,7 @@ class LawBot {
 
         if (this.tick - this.lastAttackTick < ATTACK_RETRY_TICKS) return;
 
-        const prey = ramping ? /^cow$/i : /^dark wizard$/i;
+        const prey = ramping ? /^cow$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
         const target = state.nearbyNpcs
             .filter(n => prey.test(n.name))
             .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
