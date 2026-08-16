@@ -12,10 +12,10 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    const VAULT = { x: 3228, z: 3358 };
+    const VAULT = { x: 3228, z: 3340 };
     // Wait south of the vault tile — close enough to see law piles
     // (~8 tiles, within 15-tile scan), well outside wizard aggro.
-    const WAIT = { x: 3229, z: 3350 };
+    const WAIT = { x: 3229, z: 3332 };
     const BANK = { x: 3185, z: 3436 };
     const BANK_AT = 30;
     const ADS = [

@@ -34,7 +34,7 @@ const SITES = [
 // All laws flow through the vault: units drop their stacks here and the
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
 // or bank — the drop-pile pattern is the collector mechanism.)
-const VAULT = { x: 3228, z: 3358 };
+const VAULT = { x: 3228, z: 3340 };
 const VAULT_AT = 8; // laws held before a vault run
 // Ice-warrior tier (7/128 laws — premium source). REAL location is the
 // Asgarnian Ice Dungeon, UNDERGROUND at (3044,9581) — reached by the
