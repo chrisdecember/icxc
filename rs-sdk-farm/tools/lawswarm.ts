@@ -285,6 +285,18 @@ class LawBot {
             .filter(i => /law rune/i.test(i.name))
             .reduce((a, i) => a + i.count, 0);
 
+        // Coin discipline: with 2+ laws aboard, a fat coin stack is keep-3
+        // poison — it outvalues a rune and death eats a law instead of gold
+        // (cost gtlaw04 a law). Shed coins while carrying.
+        if (this.laws >= 2) {
+            const coins = state.inventory.find(i => /^coins$/i.test(i.name));
+            if (coins) {
+                this.exec({ type: 'dropItem', slot: coins.slot, reason: 'coin-shed' });
+                this.waitTicks = 1;
+                return;
+            }
+        }
+
         // Junk discipline: laws must stay the top-value stack we hold.
         const junk = state.inventory.find(i => JUNK.test(i.name));
         if (junk) {
@@ -638,7 +650,7 @@ class LawBot {
             this.waitTicks = 3;
             return;
         }
-        const coinPile = state.groundItems.find(
+        const coinPile = this.laws >= 2 ? undefined : state.groundItems.find(
             g => /^coins$/i.test(g.name) && Math.hypot(g.x - px, g.z - pz) <= 2
         );
         if (coinPile) {
