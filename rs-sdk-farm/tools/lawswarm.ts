@@ -60,17 +60,23 @@ const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|new
 // hops keep BFS bearings on walkable ground instead of aiming diagonally
 // across fenced fields — the diagonal is what created the (3262-3265,
 // 3277-3298) dead pocket.
+// r: arrival radius. The two farm-belt crossing WPs use a tight radius —
+// the default 10 let units "arrive" from the wrong side of the fence.
 const MARCH_WAYPOINTS = [
-    { x: 3245, z: 3235 },  // NE of Lumbridge, open ground
-    { x: 3262, z: 3253 },  // junction west of cow fence (proven)
-    { x: 3252, z: 3280 },  // road north between fields
-    { x: 3253, z: 3305 },  // farm-belt crossing (gtlaw14's proven gap)
-    { x: 3264, z: 3321 },  // road bend NE past the fields
-    { x: 3280, z: 3340 },  // open ground (proven)
-    { x: 3285, z: 3365 },  // North (proven)
-    { x: 3280, z: 3380 },  // North past barriers (proven)
-    { x: 3235, z: 3374 },  // West approach to circle
+    { x: 3245, z: 3235, r: 10 },  // NE of Lumbridge, open ground
+    { x: 3262, z: 3253, r: 10 },  // junction west of cow fence (proven)
+    { x: 3252, z: 3280, r: 5 },   // road north between fields
+    { x: 3253, z: 3308, r: 5 },   // farm-belt crossing (gtlaw14's proven gap)
+    { x: 3264, z: 3321, r: 10 },  // road bend NE past the fields
+    { x: 3280, z: 3340, r: 10 },  // open ground (proven)
+    { x: 3285, z: 3365, r: 10 },  // North (proven)
+    { x: 3280, z: 3380, r: 10 },  // North past barriers (proven)
+    { x: 3235, z: 3374, r: 10 },  // West approach to circle
 ];
+// South face of the farm-belt fence: any unit that thinks it is past the
+// crossing but still sits in this box has NOT crossed — send it back to
+// the road approach instead of letting it grind north into the fence.
+const BELT = { x0: 3248, x1: 3280, z1: 3304, backTo: 2 };
 
 class LawBot {
     private session: LiteSession | null = null;
@@ -93,6 +99,7 @@ class LawBot {
     private staleSince = 0;
     private marchWp = -1;
     private marchWpSince = 0;
+    private forceCount = 0;
 
     laws = 0;
     xpGained = 0;
@@ -308,6 +315,18 @@ class LawBot {
         const ramping = this.cl < RAMP_UNTIL;
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
+
+        // Silent-reject detector: BFS can accept a walk the server rejects,
+        // leaving lastFailure empty while the bot stands still forever
+        // (gtlaw02 at the windmill fence, gtlaw07 in the cabbage patch).
+        // A unit that is traveling but hasn't moved a tile in 30 ticks is
+        // stuck no matter what the executor reported — synthesize a failure
+        // so the gate-open/escape machinery engages.
+        const resting = maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4);
+        const traveling = Math.hypot(px - anchor.x, pz - anchor.z) > 14;
+        if (traveling && !resting && !this.lastFailure && this.tick - this.staleSince > 30 && this.staleSince > 0) {
+            this.lastFailure = 'walk:client_rejected-silent';
+        }
 
         // Opportunistic attack: check for attackable targets BEFORE stuck-
         // escape — a unit jittering near men can still train combat.
@@ -574,11 +593,21 @@ class LawBot {
                 this.marchWp = bestDist < 12 ? Math.min(bestIdx + 1, MARCH_WAYPOINTS.length) : bestIdx;
                 this.marchWpSince = this.tick;
             }
+            // Crossing regression guard: claiming to be past the farm-belt
+            // crossing while still south of the fence means the arrival check
+            // lied — go back to the road approach and cross for real.
+            if (this.marchWp >= BELT.backTo + 2 && this.marchWp < MARCH_WAYPOINTS.length &&
+                px >= BELT.x0 && px <= BELT.x1 && pz <= BELT.z1 && pz >= 3285) {
+                this.marchWp = BELT.backTo;
+                this.marchWpSince = this.tick;
+                console.log(`[${this.name}] MARCH-REGRESS at (${px},${pz}) — south of belt fence, back to wp${BELT.backTo}`);
+            }
+
             const wpIdx = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
             const wp = this.marchWp >= MARCH_WAYPOINTS.length ? anchor : MARCH_WAYPOINTS[wpIdx];
             const distToWp = Math.hypot(px - wp.x, pz - wp.z);
 
-            if (distToWp < 10 && this.marchWp < MARCH_WAYPOINTS.length) {
+            if (distToWp < ((wp as any).r ?? 10) && this.marchWp < MARCH_WAYPOINTS.length) {
                 this.marchWp++;
                 this.marchWpSince = this.tick;
                 console.log(`[${this.name}] WAYPOINT ${this.marchWp}/${MARCH_WAYPOINTS.length} reached at (${px},${pz})`);
@@ -605,11 +634,13 @@ class LawBot {
             if (wpStall > 240) {
                 // Force-toward-WP: offset the target around the waypoint's
                 // bearing instead of shoving blind east (blind east is what
-                // built the dead pocket at x=3262-3265). Cycle W/direct/E/N
-                // offsets so successive windows probe different approaches.
-                const OFFSETS = [
-                    { dx: 0, dz: 0 }, { dx: -8, dz: 0 }, { dx: 8, dz: 0 }, { dx: 0, dz: 8 },
-                ];
+                // built the dead pocket at x=3262-3265). Inside the farm belt
+                // probe WEST first — the road crossing is west, east is the
+                // pocket. Elsewhere cycle W/direct/N.
+                const inBelt = px >= BELT.x0 && px <= BELT.x1 && pz >= 3285 && pz <= BELT.z1;
+                const OFFSETS = inBelt
+                    ? [{ dx: -10, dz: -2 }, { dx: -14, dz: 4 }, { dx: -6, dz: 8 }]
+                    : [{ dx: 0, dz: 0 }, { dx: -8, dz: 0 }, { dx: 0, dz: 8 }];
                 const o = OFFSETS[Math.floor(wpStall / 40) % OFFSETS.length];
                 const fx = wp.x + o.dx, fz = wp.z + o.dz;
                 // Step at most ~12 tiles from here toward the offset target.
@@ -619,7 +650,8 @@ class LawBot {
                 const tz = Math.round(pz + ((fz - pz) / fd) * step);
                 this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason: 'march-force' });
                 this.lastFailure = '';
-                if (wpStall % 60 === 1) {
+                this.forceCount++;
+                if (this.forceCount % 15 === 1) {
                     console.log(`[${this.name}] MARCH-FORCE stall=${wpStall} at (${px},${pz}) -> (${tx},${tz}) [wp${this.marchWp}+(${o.dx},${o.dz})]`);
                 }
                 this.waitTicks = 3;
