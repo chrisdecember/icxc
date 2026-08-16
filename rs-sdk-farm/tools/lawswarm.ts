@@ -326,8 +326,10 @@ class LawBot {
                     this.escapeTries = 0;
                     return;
                 }
-                if (this.tick % 40 === 0) {
-                    console.log(`[${this.name}] ATTACK-BLOCKED ${opportunistic.name} reach=${opportunistic.reachable} d=${opportunistic.distance} fail=${this.lastFailure}`);
+                // cant_reach from attack = NPC too far, NOT the bot stuck.
+                // Clear so march logic runs instead of stuck-escape.
+                if (/cant_reach/.test(this.lastFailure)) {
+                    this.lastFailure = '';
                 }
             }
         }
