@@ -252,12 +252,16 @@ await runScript(
       );
     }
 
-    /** Update combat style based on kill count. Rotates every 5 kills. */
+    /** Update combat style based on kill count. Rotates every 5 kills.
+     *  Weapons have FOUR styles and style 3 (Block) is the Defence one —
+     *  the old 0-2 cycle never trained Defence at all (it sat at level 1
+     *  while Strength hit 85). Defence-weighted to catch up. */
     function updateCombatStyle() {
-      const newStyle = Math.floor(totalKills / 5) % 3;
+      const CYCLE = [0, 3, 1, 3, 2, 3]; // heavy Block until Defence recovers
+      const newStyle = CYCLE[Math.floor(totalKills / 5) % CYCLE.length];
       if (newStyle !== combatStyle) {
         combatStyle = newStyle;
-        const styleName = ["Attack", "Strength", "Defence"][combatStyle];
+        const styleName = ["Attack", "Strength", "Strength/Def", "Defence"][combatStyle];
         console.log(
           `[KING] Switching combat style to ${styleName} (style ${combatStyle})`
         );
