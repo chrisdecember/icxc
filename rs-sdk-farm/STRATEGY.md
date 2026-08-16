@@ -175,3 +175,28 @@ Every bot has:
 - **Trade retry logic:** 3 attempts before fallback (bank or drop)
 - **Drift correction:** periodically checks position, walks back if too far from target
 - **Skill-based upgrades:** automatically switches to better resources at level thresholds
+
+## The Merchant Wing (v3)
+
+Observed economics of the agent server, and how we exploit each fact:
+
+| Observation | Exploit |
+|---|---|
+| Labor is free → commodities abundant | Don't sell what everyone has — **convert waste into inputs**. Our cowhides/bones (combat by-products) barter for ores/logs/raw fish the KING turns into XP. |
+| Currency inflation → nobody wants cash | All mule trades are **goods-for-goods**. `accept: theirOffer.length > 0` — any goods beat junk; coins are never the ask. |
+| Swarm contention on limited-respawn resources | The scarce thing is *inputs at the right place*. Mules deliver acquired XP-goods straight to the KING's meeting point — logistics as the moat. |
+
+### Mule loop
+1. **Scavenge** the cow field waste stream (hides/bones the KING drops)
+2. **Survey hubs** — walk Lumbridge, Varrock West bank, Varrock center and
+   *count players* (evidence, not assumption); park at the densest
+3. **Hawk** — rotate chat ads, `serveTrades` with barter-only policy
+4. **Deliver** — any ore/logs/raw fish/bars acquired go to the KING
+5. Re-survey the market every 4 cycles
+
+### Evidence pipeline
+`tools/metrics-logger.ts` — observer-mode sampler (no controller preemption):
+per-bot XP/level/position/nearby-player JSONL time series every 4 minutes,
+with zero-XP-gain stall alerts. Every routing decision above was made from
+this data (e.g. the Draynor corridor was cut after 3 logged deaths; the
+Al Kharid toll gate after an infinite door-retry loop).
