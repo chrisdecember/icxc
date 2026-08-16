@@ -112,6 +112,7 @@ class LawBot {
     private forceCount = 0;
     private lastGateTick = -99;
     private lastStyleTick = -99;
+    private recovering = false;
 
     laws = 0;
     xpGained = 0;
@@ -328,6 +329,19 @@ class LawBot {
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
 
+        // Recovery mode with hysteresis: enter at <55% hp, exit only at
+        // >=85% — and while recovering, ATTACKS ARE SUPPRESSED (gated below).
+        // Without suppression a chasing wizard re-engages the unit at the
+        // rest spot and "rest" is just dying slightly farther away
+        // (laws=5 flat while deaths climbed to 11). Computed here, BEFORE
+        // the attack block, so a unit mid-fight can actually disengage.
+        if (!ramping && maxHp > 0 && hp > 0) {
+            if (hp < Math.max(4, maxHp * 0.55)) this.recovering = true;
+            else if (hp >= maxHp * 0.85) this.recovering = false;
+        } else {
+            this.recovering = false;
+        }
+
         // Silent-reject detector: BFS can accept a walk the server rejects,
         // leaving lastFailure empty while the bot stands still forever
         // (gtlaw02 at the windmill fence, gtlaw07 in the cabbage patch).
@@ -388,7 +402,7 @@ class LawBot {
             : iceTier ? /^ice warrior$/i
             : farFromCircle ? /^dark wizard$/i
             : /^dark wizard$|^man$|^woman$/i;
-        if (this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
+        if (!this.recovering && this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
             if (ramping && this.tick % 40 === 0) {
                 const men = state.nearbyNpcs.filter(n => prey.test(n.name)).slice(0, 3);
                 if (men.length > 0) {
@@ -534,11 +548,13 @@ class LawBot {
         // (three 0-law circle deaths proved it). Rest spot pushed to +20/-14
         // so regen happens outside wizard wander range.
         const restX = anchor.x + 20, restZ = anchor.z - 14;
-        if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.55)) {
+        if (this.recovering) {
             if (Math.hypot(px - restX, pz - restZ) > 4) {
                 this.walkToward(px, pz, restX, restZ, 'rest');
+                this.waitTicks = 6;
+            } else {
+                this.waitTicks = 30;
             }
-            this.waitTicks = 40;
             return;
         }
 
@@ -629,6 +645,7 @@ class LawBot {
             return;
         }
 
+        if (this.recovering) return;
         if (this.tick - this.lastAttackTick < ATTACK_RETRY_TICKS) return;
 
         const preyAll = state.nearbyNpcs
