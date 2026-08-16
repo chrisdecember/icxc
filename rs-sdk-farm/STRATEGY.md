@@ -200,3 +200,22 @@ per-bot XP/level/position/nearby-player JSONL time series every 4 minutes,
 with zero-XP-gain stall alerts. Every routing decision above was made from
 this data (e.g. the Draynor corridor was cut after 3 logged deaths; the
 Al Kharid toll gate after an infinite door-retry loop).
+
+## 24-Hour Autonomous Ops (v4)
+
+- **tools/supervisor.sh** — process supervisor: every 90s, restarts any dead
+  game client or brain from a roster file. Roster is re-read each cycle so
+  bots can be added without a restart. The fleet survives crashes, script
+  timeouts, and server disconnects unattended.
+- **tools/generate-dashboard.ts** — renders the live-ops dashboard (per-bot
+  sparklines, lvl/hr rates, stall pills, hub-density market intel, trade log,
+  restart log) from metrics.jsonl + process logs. Republished hourly to a
+  stable artifact URL.
+- **Cornering niche markets:**
+  - `bots/ironbaron` — scarcity ladder: copper → iron (15) → coal at the
+    Al Kharid mine (30). Iron/coal are the contested limited-respawn inputs.
+  - `bots/arb` — cash-to-consumables arbitrage: NPC shops keep static prices
+    while the player economy inflates, so pickpocketed cash buys bronze
+    arrows at 1gp (Lowe's, stock 2000) to barter as ranged-training ammo.
+- **Hourly pulse** — a scheduled check-in reviews telemetry, fixes stalls,
+  republishes the dashboard, and re-arms itself for ~24 hours.
