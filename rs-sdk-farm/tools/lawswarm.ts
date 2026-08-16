@@ -257,8 +257,10 @@ class LawBot {
                 const opt = door.optionsWithIndex.find(o => /open/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: door.x, z: door.z, locId: door.id, optionIndex: opt.opIndex, reason: 'escape-door' });
             } else {
-                const dx = [1, -1, 2, -2, 0, 0][this.escapeTries % 6];
-                const dz = [0, 0, 0, 0, 2, -2][this.escapeTries % 6];
+                // Wide random jitter (±1..5): units walk the fence contour
+                // until a gate falls inside the 15-tile loc scan.
+                const dx = (1 + (this.tick + this.escapeTries) % 5) * ((this.tick + this.escapeTries) % 2 === 0 ? 1 : -1);
+                const dz = (1 + (this.tick * 7 + this.escapeTries) % 5) * ((this.tick >> 1) % 2 === 0 ? 1 : -1);
                 this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'escape-jitter' });
             }
             this.waitTicks = 2;
@@ -348,20 +350,30 @@ class LawBot {
             return;
         }
 
-        if (Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
+        if (this.tick - this.lastAttackTick < ATTACK_RETRY_TICKS) return;
+
+        // Navigate by the HERD, not the map pin. The cow-pen anchor tile is
+        // fence-blocked from outside — units orbited the pen for an hour
+        // failing walkTo(anchor). Any visible prey is ground truth: reachable
+        // -> attack; visible-but-fenced -> stalk toward it (the jitter+door
+        // escape walks the fence line until a gate enters scan range).
+        const prey = ramping ? /^cow$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
+        const preyAll = state.nearbyNpcs
+            .filter(n => prey.test(n.name))
+            .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
+            .sort((a, b) => a.distance - b.distance);
+        const target = preyAll.filter(n => n.reachable !== false)[0];
+        const visible = preyAll[0];
+        if (!target && visible) {
+            this.walkToward(px, pz, visible.x, visible.z, 'stalk');
+            this.waitTicks = 3;
+            return;
+        }
+        if (!target && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
             this.walkToward(px, pz, anchor.x, anchor.z, 'station');
             this.waitTicks = 4;
             return;
         }
-
-        if (this.tick - this.lastAttackTick < ATTACK_RETRY_TICKS) return;
-
-        const prey = ramping ? /^cow$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
-        const target = state.nearbyNpcs
-            .filter(n => prey.test(n.name))
-            .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
-            .filter(n => n.reachable !== false)
-            .sort((a, b) => a.distance - b.distance)[0];
         if (!target) {
             this.waitTicks = 6;
             return;
