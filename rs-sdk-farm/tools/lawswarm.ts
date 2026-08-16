@@ -451,7 +451,9 @@ class LawBot {
         const hasBetterSword = state.inventory.concat((state as any).equipment ?? [])
             .some(i => /iron sword|steel sword|scimitar/i.test(i.name));
         const coinsHeld = state.inventory.filter(i => /^coins$/i.test(i.name)).reduce((a, i) => a + i.count, 0);
-        if (!ramping && !hasBetterSword && coinsHeld >= 120) {
+        const reachedCircle = this.marchWp >= MARCH_WAYPOINTS.length ||
+            Math.hypot(px - anchor.x, pz - anchor.z) < 16;
+        if (!ramping && !hasBetterSword && coinsHeld >= 120 && reachedCircle) {
             if (Math.hypot(px - SWORDSHOP.x, pz - SWORDSHOP.z) > 3) {
                 this.exec({ type: 'walkTo', x: SWORDSHOP.x, z: SWORDSHOP.z, running: true, reason: 'gear up' });
                 this.waitTicks = 5;
@@ -472,7 +474,7 @@ class LawBot {
                 this.exec({ type: 'shopBuy', slot: sword.slot, amount: 1, reason: 'buy iron sword' });
                 this.waitTicks = 3;
             }
-            this.exec({ type: 'closeShop', reason: 'done' });
+            this.exec({ type: 'closeModal', reason: 'done' });
             return;
         }
         const newSword = state.inventory.find(i => /iron sword|steel sword|scimitar/i.test(i.name));
@@ -558,17 +560,25 @@ class LawBot {
             }
 
             if (wpStall > 200) {
-                const ex = Math.min(px + 15, 3290);
-                const ez = Math.min(pz + 8, wp.z);
-                this.exec({ type: 'walkTo', x: ex, z: ez, running: true, reason: 'march-force-east' });
-                if (wpStall % 60 === 1) {
-                    console.log(`[${this.name}] MARCH-FORCE-EAST stall=${wpStall} at (${px},${pz}) -> (${ex},${ez})`);
+                if (px >= wp.x - 5 && this.marchWp < MARCH_WAYPOINTS.length) {
+                    this.marchWp++;
+                    this.marchWpSince = this.tick;
+                    console.log(`[${this.name}] MARCH-ADVANCE (east of wp) at (${px},${pz}) -> wp=${this.marchWp}`);
+                } else {
+                    const ex = Math.min(px + 15, 3290);
+                    const ez = Math.min(pz + 8, wp.z);
+                    this.exec({ type: 'walkTo', x: ex, z: ez, running: true, reason: 'march-force-east' });
+                    if (wpStall % 60 === 1) {
+                        console.log(`[${this.name}] MARCH-FORCE-EAST stall=${wpStall} at (${px},${pz}) -> (${ex},${ez})`);
+                    }
+                    this.waitTicks = 3;
+                    return;
                 }
-                this.waitTicks = 3;
-                return;
             }
 
-            const moved = this.walkToward(px, pz, wp.x, wp.z, 'march');
+            const wpIdx2 = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
+            const curWp = this.marchWp >= MARCH_WAYPOINTS.length ? anchor : MARCH_WAYPOINTS[wpIdx2];
+            const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
             if (!moved) {
                 this.lastFailure = 'march:cant_reach';
             }
