@@ -120,6 +120,19 @@ class LawBot {
         return xp;
     }
 
+    private walkToward(px: number, pz: number, tx: number, tz: number, reason: string): void {
+        const dx = tx - px, dz = tz - pz;
+        const dist = Math.hypot(dx, dz);
+        const STEP = 10; // lite BFS build-area is bounded; hop in short steps
+        if (dist <= STEP) {
+            this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason });
+        } else {
+            const nx = Math.round(px + (dx / dist) * STEP);
+            const nz = Math.round(pz + (dz / dist) * STEP);
+            this.exec({ type: 'walkTo', x: nx, z: nz, running: true, reason: reason + '-hop' });
+        }
+    }
+
     private async onTick(): Promise<void> {
         if (!this.client || !this.collector) return;
         if (this.busy) return;
@@ -194,7 +207,7 @@ class LawBot {
         // Rest when low: step off the circle and let regen work.
         if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.4)) {
             if (Math.hypot(px - (anchor.x + 14), pz - (anchor.z - 10)) > 4) {
-                this.exec({ type: 'walkTo', x: anchor.x + 14, z: anchor.z - 10, running: true, reason: 'rest' });
+                this.walkToward(px, pz, anchor.x + 14, anchor.z - 10, 'rest');
             }
             this.waitTicks = 40;
             return;
@@ -270,8 +283,8 @@ class LawBot {
         }
 
         if (Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
-            this.exec({ type: 'walkTo', x: anchor.x, z: anchor.z, running: true, reason: 'station' });
-            this.waitTicks = 5;
+            this.walkToward(px, pz, anchor.x, anchor.z, 'station');
+            this.waitTicks = 4;
             return;
         }
 

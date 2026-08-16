@@ -48,10 +48,14 @@ await runScript(
       try {
         await bot.openShop(/gerrant/i);
         for (let i = 0; i < 5; i++) {
-          try {
-            await bot.buyFromShop(/small fishing net/i, 1);
-            netsBought++;
-          } catch (_) { break; }
+          // Count only nets that actually land in the pack — buyFromShop
+          // "succeeds" against an empty shop but adds nothing (the counter
+          // was lying: 20 "bought", 1 held). Verify by inventory delta.
+          const before = sdk.countInventoryItems(/fishing net/i);
+          try { await bot.buyFromShop(/small fishing net/i, 1); } catch (_) { break; }
+          const after = sdk.countInventoryItems(/fishing net/i);
+          if (after > before) netsBought++;
+          else { console.log("[ARB] Gerrant's is OUT of nets — swarm drained it"); break; }
         }
         // Arrows for the ranged-training crowd while we're here
         try { await bot.buyFromShop(/feather/i, 50); } catch (_) {}

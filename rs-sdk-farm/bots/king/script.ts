@@ -270,9 +270,23 @@ await runScript(
     }
 
     // ═════════════════════════════════════════════════════════
+    //  RESUME GATE — a restarted KING already has the levels. Re-running
+    //  thieving->smithing->cooking wastes ~15 min of low-value early game
+    //  per death. If Attack is already trained, skip straight to war.
+    // ═════════════════════════════════════════════════════════
+    const resumeAtk = sdk.getSkill("Attack")?.level ?? 1;
+    const SKIP_TO_COMBAT = resumeAtk >= 20;
+    if (SKIP_TO_COMBAT) {
+      console.log(
+        `[KING] Resume gate: Attack ${resumeAtk} — skipping setup, straight to combat`
+      );
+    }
+
+    // ═════════════════════════════════════════════════════════
     //  PHASE 1: THIEVING BLITZ — fastest skill, generates GP
     // ═════════════════════════════════════════════════════════
     try {
+      if (SKIP_TO_COMBAT) throw new Error("skip-to-combat");
       console.log("[KING] Phase 1: Thieving blitz");
       await sdk.say("the king has arrived");
       await bot.walkTo(LUMBRIDGE_SPAWN.x, LUMBRIDGE_SPAWN.z);
@@ -302,6 +316,7 @@ await runScript(
     //  PHASE 2: TOOL ACQUISITION — spend that stolen gold
     // ═════════════════════════════════════════════════════════
     try {
+      if (SKIP_TO_COMBAT) throw new Error("skip-to-combat");
       console.log("[KING] Phase 2: Shopping spree");
 
       // Death-recovery self-heal: dying strips tools AND coins. If we're
@@ -366,6 +381,7 @@ await runScript(
     //  PHASE 3: WOODCUTTING + FLETCHING + FIREMAKING BURST
     // ═════════════════════════════════════════════════════════
     try {
+      if (SKIP_TO_COMBAT) throw new Error("skip-to-combat");
       console.log("[KING] Phase 3: WC / Fletch / Firemaking");
       await sdk.say("king chopping wood");
       await bot.walkTo(LUMBRIDGE_TREES.x, LUMBRIDGE_TREES.z);
@@ -460,6 +476,7 @@ await runScript(
     //  PHASE 4: RECEIVE ORES -> SMELT -> SMITH (with fallback)
     // ═════════════════════════════════════════════════════════
     try {
+      if (SKIP_TO_COMBAT) throw new Error("skip-to-combat");
       console.log("[KING] Phase 4: Smelting & Smithing");
       await sdk.say("king at furnace bring ores now");
 
@@ -531,6 +548,7 @@ await runScript(
     //  PHASE 5: RECEIVE FISH -> COOK
     // ═════════════════════════════════════════════════════════
     try {
+      if (SKIP_TO_COMBAT) throw new Error("skip-to-combat");
       console.log("[KING] Phase 5: Cooking");
       await sdk.say("king at range bring fish now");
 
