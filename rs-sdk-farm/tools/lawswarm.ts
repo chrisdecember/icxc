@@ -24,7 +24,7 @@ import type { LiteClient } from './LiteClient.js';
 // RAMP on Lumbridge men (open field, no fences — the cow pen gate was
 // a 2-hour blocker: gate already open but units closing it, east fence
 // blocking west approach, geometry too complex for blind navigation).
-const RAMP = { x: 3236, z: 3240 };
+const RAMP = { x: 3222, z: 3222 };
 // Lumbridge-zone removed: no dark wizards spawn there (only men/rats).
 // All graduated units converge on the Varrock circle.
 const SITES = [
@@ -46,7 +46,7 @@ const ICE_ENABLED = process.env.ICE === '1';
 const ICE_ENTRANCE = { x: 3008, z: 3150 };
 const ICE_SITE = { name: 'asgarnian-ice-dungeon', x: 3044, z: 9581 };
 const SWORDSHOP = { x: 3203, z: 3397 };
-const RAMP_UNTIL = 16; // avg(atk,str,def,hp) before graduating to dark wizards
+const RAMP_UNTIL = 10; // avg(atk,str,def,hp) before graduating to dark wizards
 const ATTACK_RETRY_TICKS = 8;
 const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
@@ -137,7 +137,7 @@ class LawBot {
     private walkToward(px: number, pz: number, tx: number, tz: number, reason: string): void {
         const dx = tx - px, dz = tz - pz;
         const dist = Math.hypot(dx, dz);
-        const STEP = 10; // lite BFS build-area is bounded; hop in short steps
+        const STEP = 5; // lite BFS build-area is bounded; tiny hops avoid out_of_range
         if (dist <= STEP) {
             this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason });
         } else {
@@ -250,15 +250,27 @@ class LawBot {
         // escape — a unit jittering near men can still train combat.
         const prey = ramping ? /^man$|^woman$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
         if (this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
+            if (ramping && this.tick % 40 === 0) {
+                const men = state.nearbyNpcs.filter(n => prey.test(n.name)).slice(0, 3);
+                if (men.length > 0) {
+                    const detail = men.map(m => `${m.name}(${m.distance}t,reach=${m.reachable},opts=[${m.optionsWithIndex.map(o=>o.text).join(',')}])`).join(' ');
+                    console.log(`[${this.name}] RAMP-SCAN at (${px},${pz}) prey: ${detail}`);
+                }
+            }
             const nearbyPrey = state.nearbyNpcs
-                .filter(n => prey.test(n.name) && n.reachable !== false)
+                .filter(n => prey.test(n.name))
                 .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
-                .sort((a, b) => a.distance - b.distance);
+                .sort((a, b) => {
+                    const ar = a.reachable !== false ? 0 : 1;
+                    const br = b.reachable !== false ? 0 : 1;
+                    return ar - br || a.distance - b.distance;
+                });
             const opportunistic = nearbyPrey[0];
             if (opportunistic) {
                 const opt = opportunistic.optionsWithIndex.find(o => /attack/i.test(o.text))!;
                 this.exec({ type: 'interactNpc', npcIndex: opportunistic.index, optionIndex: opt.opIndex, reason: 'attack' });
                 this.lastAttackTick = this.tick;
+                if (this.lastFailure) console.log(`[${this.name}] COMBAT ${opportunistic.name} (was stuck, now fighting)`);
                 this.lastFailure = '';
                 this.escapeTries = 0;
                 return;
@@ -266,9 +278,10 @@ class LawBot {
         }
 
         // Stuck-escape: open closed doors/gates if reachable, otherwise jitter.
-        if (/client_rejected/.test(this.lastFailure)) {
+        // out_of_range = BFS build-area too small to reach target; needs jitter too.
+        if (/client_rejected|out_of_range/.test(this.lastFailure)) {
             this.escapeTries++;
-            if (this.escapeTries > 30) {
+            if (this.escapeTries > 20) {
                 this.lastFailure = '';
                 this.escapeTries = 0;
             }
@@ -286,12 +299,25 @@ class LawBot {
                 const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: reachableClosed.x, z: reachableClosed.z, locId: reachableClosed.id, optionIndex: opt.opIndex, reason: 'gate-open' });
                 console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z})`);
-                this.waitTicks = 3;
+                this.waitTicks = 1;
+                this.lastFailure = '';
+                this.escapeTries = 0;
                 return;
             }
 
-            const dx = (1 + (this.tick + this.escapeTries) % 5) * ((this.tick + this.escapeTries) % 2 === 0 ? 1 : -1);
-            const dz = (1 + (this.tick * 7 + this.escapeTries) % 5) * ((this.tick >> 1) % 2 === 0 ? 1 : -1);
+            let dx: number, dz: number;
+            const toDist = Math.hypot(anchor.x - px, anchor.z - pz);
+            if (!ramping && toDist > 14) {
+                // Bias jitter toward station with wobble to dodge obstacles
+                const step = 3 + this.escapeTries % 3;
+                const nx = (anchor.x - px) / toDist, nz = (anchor.z - pz) / toDist;
+                const wobble = ((this.tick + this.escapeTries) % 3 - 1) * 0.6;
+                dx = Math.round((nx + wobble * nz) * step);
+                dz = Math.round((nz - wobble * nx) * step);
+            } else {
+                dx = (1 + (this.tick + this.escapeTries) % 5) * ((this.tick + this.escapeTries) % 2 === 0 ? 1 : -1);
+                dz = (1 + (this.tick * 7 + this.escapeTries) % 5) * ((this.tick >> 1) % 2 === 0 ? 1 : -1);
+            }
             this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'escape-jitter' });
             this.waitTicks = 2;
             return;
@@ -381,16 +407,49 @@ class LawBot {
         const preyAll = state.nearbyNpcs
             .filter(n => prey.test(n.name))
             .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
-            .sort((a, b) => a.distance - b.distance);
-        const target = preyAll.filter(n => n.reachable !== false)[0];
+            .sort((a, b) => {
+                const ar = a.reachable !== false ? 0 : 1;
+                const br = b.reachable !== false ? 0 : 1;
+                return ar - br || a.distance - b.distance;
+            });
+        const target = preyAll.find(n => n.reachable !== false);
         const visible = preyAll[0];
         if (!target && visible) {
             this.walkToward(px, pz, visible.x, visible.z, 'stalk');
             this.waitTicks = 3;
             return;
         }
-        if (!target && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
-            this.walkToward(px, pz, anchor.x, anchor.z, 'station');
+        if (!target && !ramping && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
+            const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
+            if (this.tick % 80 === 0) {
+                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} to ${this.site.name}`);
+            }
+            // Microstep: try 1-tile moves in priority order toward target.
+            // exec() is synchronous for walkTo — try next direction if one fails.
+            const tdx = Math.sign(anchor.x - px);
+            const tdz = Math.sign(anchor.z - pz);
+            const dirs = [
+                [tdx, tdz], [0, tdz], [tdx, 0],
+                [-tdx, tdz], [tdx, -tdz],
+                [-tdx, 0], [0, -tdz],
+            ].filter(d => d[0] !== 0 || d[1] !== 0);
+            let stepped = false;
+            for (const [sx, sz] of dirs) {
+                this.exec({ type: 'walkTo', x: px + sx, z: pz + sz, reason: 'micro' });
+                if (!this.lastFailure) { stepped = true; break; }
+            }
+            if (!stepped) {
+                this.walkToward(px, pz, anchor.x, anchor.z, 'station');
+            }
+            this.waitTicks = 2;
+            return;
+        }
+        if (!target && ramping) {
+            // Location-free ramp: random-walk to scout for men instead of
+            // walking to a fixed anchor (which hits buildings/doors).
+            const dx = (3 + this.tick % 7) * ((this.tick + Math.floor(px)) % 2 === 0 ? 1 : -1);
+            const dz = (3 + (this.tick * 3) % 7) * ((this.tick + Math.floor(pz)) % 2 === 0 ? 1 : -1);
+            this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, running: true, reason: 'ramp-scout' });
             this.waitTicks = 4;
             return;
         }

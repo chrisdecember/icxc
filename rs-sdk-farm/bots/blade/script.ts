@@ -12,7 +12,7 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    const RAMP_AREA = { x: 3236, z: 3240 };
+    const RAMP_AREA = { x: 3222, z: 3222 };
     const DARK_WIZARDS = { x: 3225, z: 3374 };
     const VARROCK_BANK = { x: 3253, z: 3420 };
     const RAMP_THRESHOLD = 25;
