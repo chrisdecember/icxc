@@ -216,21 +216,18 @@ await runScript(
         await bot.dismissBlockingUI();
         await eatIfLow(0.4);
 
-        // Failed pickpockets chip 1hp each — restock bread before it kills.
+        // Failed pickpockets chip 1hp each and no local shop sells food
+        // (Lumbridge general store carries none). Rest on natural regen
+        // instead of dying: step aside and wait until healthy.
         const hpState = sdk.getState()?.player;
-        if (
-          hpState &&
-          hpState.hp < hpState.maxHp * 0.5 &&
-          !sdk.findInventoryItem(/bread|kebab|shrimps/i) &&
-          sdk.countInventoryItems(/coins/i) >= 40
-        ) {
-          console.log("[FINGERS] Low HP, buying bread");
-          await bot.walkTo(3212, 3247);
-          try {
-            await bot.openShop(/shop.*keeper/i);
-            await bot.buyFromShop(/bread/i, 3);
-            await bot.closeShop();
-          } catch (_) {}
+        if (hpState && hpState.hp < hpState.maxHp * 0.35) {
+          console.log("[FINGERS] Low HP — resting until recovered");
+          await bot.walkTo(3236, 3210);
+          while (true) {
+            const s = sdk.getState()?.player;
+            if (!s || s.hp >= s.maxHp * 0.7) break;
+            await sdk.waitForTicks(20);
+          }
           await bot.walkTo(LUMBRIDGE_MEN.x, LUMBRIDGE_MEN.z);
         }
 
