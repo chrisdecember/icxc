@@ -553,9 +553,19 @@ class LawBot {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length}`);
             }
 
-            const moved = this.walkToward(px, pz, wp.x, wp.z, 'march');
-            if (!moved) {
-                this.lastFailure = 'march:cant_reach';
+            const stuckTicks = this.tick - this.staleSince;
+            if (stuckTicks > 40) {
+                const jx = (4 + this.tick % 7) * (this.tick % 3 === 0 ? 1 : -1);
+                const jz = (4 + (this.tick * 5) % 7) * (this.tick % 5 < 2 ? 1 : -1);
+                this.exec({ type: 'walkTo', x: px + jx, z: pz + jz, running: true, reason: 'march-jitter' });
+                if (stuckTicks % 40 === 1) {
+                    console.log(`[${this.name}] MARCH-STUCK ${stuckTicks}t at (${px},${pz})`);
+                }
+            } else {
+                const moved = this.walkToward(px, pz, wp.x, wp.z, 'march');
+                if (!moved) {
+                    this.lastFailure = 'march:cant_reach';
+                }
             }
             this.waitTicks = 2;
             return;
