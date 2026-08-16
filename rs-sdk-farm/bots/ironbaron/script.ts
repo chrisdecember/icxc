@@ -29,6 +29,11 @@ await runScript(
     let deliveries = 0;
     let lastPos = { x: 0, z: 0 };
     let lastNpcs: string[] = [];
+    // Iron rocks are heavily contested (measured: 8+ min zero XP while
+    // camped by other agents). Verify iron pays; else join copper/tin.
+    let ironFallback = false;
+    let ironXpMark = -1;
+    let ironAttempts = 0;
 
     async function walkWaypoints(points: { x: number; z: number }[]) {
       for (const p of points) await bot.walkTo(p.x, p.z);
@@ -49,7 +54,18 @@ await runScript(
 
     async function mineOne() {
       const level = sdk.getSkill("Mining")?.level ?? 1;
-      const pattern = level >= 15 ? /iron/i : /copper|tin/i;
+      const wantIron = level >= 15 && !ironFallback;
+      if (wantIron) {
+        const xpNow = sdk.getSkillXp("Mining") ?? 0;
+        if (ironXpMark === -1 || xpNow > ironXpMark) {
+          ironXpMark = xpNow;
+          ironAttempts = 0;
+        } else if (++ironAttempts >= 40) {
+          console.log("[IRONMN] Iron camped by the swarm — joining copper/tin");
+          ironFallback = true;
+        }
+      }
+      const pattern = wantIron && !ironFallback ? /iron/i : /copper|tin/i;
       const rock = sdk.findNearbyLoc(pattern, { withOption: /mine/i });
       if (rock) {
         try {
