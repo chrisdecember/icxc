@@ -591,13 +591,13 @@ class LawBot {
             return;
         }
 
-        // Retreat when swarmed: 3+ dark wizards inside 8 tiles is a losing
-        // fight at this tier — disengage to the rest spot before the gang
-        // burns the HP pool. Uptime farms laws; deaths farm nothing.
+        // Retreat when swarmed: 4+ dark wizards inside 8 tiles at low HP.
+        // Aligned with recovery threshold (55%) so bots fight instead of
+        // oscillating between circle and rest spot (v7.22: was 3/80%).
         if (!ramping && Math.hypot(px - anchor.x, pz - anchor.z) <= 14) {
             const packed = state.nearbyNpcs.filter(n =>
                 /^dark wizard$/i.test(n.name) && n.distance <= 8).length;
-            if (packed >= 3 && hp < maxHp * 0.8) {
+            if (packed >= 4 && hp < maxHp * 0.55) {
                 if (this.tick % 40 === 0) {
                     console.log(`[${this.name}] CIRCLE-RETREAT ${packed} wizards packed, hp=${hp}/${maxHp}`);
                 }
