@@ -34,7 +34,7 @@ const SITES = [
 // All laws flow through the vault: units drop their stacks here and the
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
 // or bank — the drop-pile pattern is the collector mechanism.)
-const VAULT = { x: 3227, z: 3368 };
+const VAULT = { x: 3228, z: 3358 };
 const VAULT_AT = 8; // laws held before a vault run
 // Ice-warrior tier (7/128 laws — premium source). REAL location is the
 // Asgarnian Ice Dungeon, UNDERGROUND at (3044,9581) — reached by the
@@ -112,6 +112,7 @@ class LawBot {
     private forceCount = 0;
     private lastGateTick = -99;
     private lastStyleTick = -99;
+    private vaultDropTick = -99;
     private recovering = false;
 
     laws = 0;
@@ -402,6 +403,25 @@ class LawBot {
             this.lastFailure = 'walk:client_rejected-silent';
         }
 
+        // Vault run: carry the stack to the drop tile; gtvault banks it.
+        // Checked BEFORE combat so wizard aggro can't trap a full law stack
+        // at the circle indefinitely (v7.21).
+        if (this.laws >= VAULT_AT) {
+            if (Math.hypot(px - VAULT.x, pz - VAULT.z) > 2) {
+                this.exec({ type: 'walkTo', x: VAULT.x, z: VAULT.z, running: true, reason: 'vault run' });
+                this.waitTicks = 5;
+                return;
+            }
+            const slot = state.inventory.find(i => /law rune/i.test(i.name))?.slot;
+            if (slot !== undefined) {
+                this.exec({ type: 'dropItem', slot, reason: 'VAULT-DROP' });
+                console.log(`[${this.name}] VAULT-DROP ${this.laws} laws`);
+                this.vaultDropTick = this.tick;
+                this.waitTicks = 3;
+                return;
+            }
+        }
+
         // Opportunistic attack: check for attackable targets BEFORE stuck-
         // escape — a unit jittering near men can still train combat.
         // Non-ramping units target dark wizards AND men — units stuck far from
@@ -587,22 +607,6 @@ class LawBot {
             }
         }
 
-        // Vault run: carry the stack to the drop tile; gtvault banks it.
-        if (this.laws >= VAULT_AT) {
-            if (Math.hypot(px - VAULT.x, pz - VAULT.z) > 2) {
-                this.exec({ type: 'walkTo', x: VAULT.x, z: VAULT.z, running: true, reason: 'vault run' });
-                this.waitTicks = 5;
-                return;
-            }
-            const slot = state.inventory.find(i => /law rune/i.test(i.name))?.slot;
-            if (slot !== undefined) {
-                this.exec({ type: 'dropItem', slot, reason: 'VAULT-DROP' });
-                console.log(`[${this.name}] VAULT-DROP ${this.laws} laws`);
-                this.waitTicks = 3;
-                return;
-            }
-        }
-
         // Gear program: dark-wizard coins buy an iron sword next door.
         const hasBetterSword = state.inventory.concat((state as any).equipment ?? [])
             .some(i => /iron sword|steel sword|scimitar/i.test(i.name));
@@ -642,10 +646,12 @@ class LawBot {
             return;
         }
 
-        // Loot law runes — but NOT at the vault tile, or the bot drops laws
-        // then immediately re-loots them, looping forever (v7.19 bug).
-        const atVault = Math.hypot(px - VAULT.x, pz - VAULT.z) <= 3;
-        const lawPile = atVault ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
+        // Loot law runes — suppress near the vault tile (radius 8) AND for
+        // 15 ticks after any vault-drop to prevent the drop-reloot cycle
+        // (v7.19 bug, widened in v7.21 after drift at radius 3).
+        const nearVault = Math.hypot(px - VAULT.x, pz - VAULT.z) <= 8;
+        const vaultCooldown = this.tick - this.vaultDropTick < 15;
+        const lawPile = (nearVault || vaultCooldown) ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
         if (lawPile) {
             this.exec({ type: 'pickupItem', x: lawPile.x, z: lawPile.z, itemId: lawPile.id, reason: 'LAW' });
             this.waitTicks = 3;
