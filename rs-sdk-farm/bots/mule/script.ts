@@ -143,6 +143,29 @@ await runScript(
         await bot.dismissBlockingUI();
       }
 
+      // Tool-sweep duty (inherited from the mint, now on knight duty in
+      // Ardougne): every 3rd cycle, buy out Bob's + general store tool
+      // stock with idle-pickpocket coins.
+      if (cycles % 3 === 2 && sdk.countInventoryItems(/coins/i) >= 60) {
+        console.log("[MULE] Tool sweep: buying out shop stock");
+        await bot.walkTo(3212, 3247);
+        try {
+          await bot.openShop(/shop.*keeper/i);
+          for (const it of [/^hammer$/i, /tinderbox/i, /chisel/i, /shears/i]) {
+            try { await bot.buyFromShop(it, 5); } catch (_) {}
+          }
+          await bot.closeShop();
+        } catch (_) {}
+        await bot.walkTo(3230, 3203);
+        try {
+          await bot.openShop(/^bob$/i);
+          for (const it of [/bronze pickaxe/i, /bronze axe/i]) {
+            try { await bot.buyFromShop(it, 5); } catch (_) {}
+          }
+          await bot.closeShop();
+        } catch (_) {}
+      }
+
       await deliverToKing();
 
       cycles++;

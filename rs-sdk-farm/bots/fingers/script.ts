@@ -1,14 +1,14 @@
 import { runScript } from "../../sdk/runner";
 
-// FINGERS v3 — THE MINT. Thieving 99 means ~every pickpocket lands: this
-// is the fastest GP printer on the server. GP is worthless to agents but
-// NPC shops still honor static prices — so the mint funds SHOP SWEEPS of
-// the goods every agent needs and loses on death: tools. Buy out the
-// stock, hand it to the hub merchants, and the swarm owns tool supply.
+// FINGERS v4 — THE KNIGHT'S PURSE. Thieving 99: Knights of Ardougne are
+// the endgame pickpocket (~50gp/pick vs 3gp from men — 16x the mint
+// rate, near-perfect success at 99). No skillcape exists on this 2004
+// server (checked the item data), and the gem stall is off-limits by
+// order — knights only.
 //
-// Loop: print GP at Lumbridge men -> sweep Bob's + general store (all
-// axes, pickaxes, hammers, tinderboxes, chisels, shears) -> hand stock
-// to the mule desk at the hub -> repeat.
+// Coins stack as one slot and survive death (most-valuable-3 rule), so
+// the war chest rides along. HP is tiny — rest-regen keeps the rare
+// failed-pick stuns from adding up.
 
 await runScript(
   async (ctx) => {
@@ -16,15 +16,20 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    const MEN_SPOT = { x: 3232, z: 3218 };
-    const HUB = { x: 3222, z: 3218 };
-    const GENERAL_STORE = { x: 3212, z: 3247 };
-    const BOBS = { x: 3230, z: 3203 };
-    const REST_SPOT = { x: 3236, z: 3210 };
-    const TOOLS = /hammer|tinderbox|axe|pickaxe|chisel|shears|net/i;
+    // Coarse east->west hops; the pathfinder owns the details.
+    const ROUTE_WEST = [
+      { x: 3092, z: 3245 }, // Draynor
+      { x: 3000, z: 3235 },
+      { x: 2900, z: 3290 },
+      { x: 2800, z: 3300 },
+      { x: 2700, z: 3305 },
+      { x: 2661, z: 3305 }, // East Ardougne market
+    ];
+    const MARKET = { x: 2661, z: 3305 };
+    const KNIGHT = /knight of ardougne|^knight$/i;
 
-    let sweeps = 0;
-    let handoffs = 0;
+    let picks = 0;
+    let startCoins = 0;
 
     async function isAlive() {
       const state = sdk.getState();
@@ -32,113 +37,70 @@ await runScript(
       return state.player.hp > 0;
     }
 
+    async function walkWest() {
+      console.log("[FINGERS] Marching west to Ardougne");
+      for (const p of ROUTE_WEST) {
+        await bot.walkTo(p.x, p.z);
+        const st = sdk.getState()?.player;
+        if (st) console.log(`[FINGERS] waypoint (${st.worldX},${st.worldZ})`);
+      }
+    }
+
     async function restIfLow() {
       const st = sdk.getState()?.player;
-      if (st && st.hp < st.maxHp * 0.35) {
-        console.log("[FINGERS] Low HP — resting until recovered");
-        await bot.walkTo(REST_SPOT.x, REST_SPOT.z);
+      if (st && st.hp < st.maxHp * 0.5) {
+        console.log("[FINGERS] Low HP — resting off the market square");
+        await bot.walkTo(MARKET.x + 8, MARKET.z + 8);
         while (true) {
           const s = sdk.getState()?.player;
-          if (!s || s.hp >= s.maxHp * 0.7) break;
+          if (!s || s.hp >= s.maxHp * 0.9) break;
           await sdk.waitForTicks(20);
         }
-        await bot.walkTo(MEN_SPOT.x, MEN_SPOT.z);
-      }
-    }
-
-    async function printGP(target: number) {
-      console.log(`[FINGERS] Minting toward ${target}gp`);
-      await bot.walkTo(MEN_SPOT.x, MEN_SPOT.z);
-      let idle = 0;
-      while (sdk.countInventoryItems(/coins/i) < target && idle < 500) {
-        if (!(await isAlive())) {
-          await sdk.waitForTicks(5);
-          await bot.walkTo(MEN_SPOT.x, MEN_SPOT.z);
-        }
-        try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
-        await bot.dismissBlockingUI();
-        await restIfLow();
-        idle++;
-      }
-      console.log(`[FINGERS] Mint at ${sdk.countInventoryItems(/coins/i)}gp`);
-    }
-
-    async function sweepShop(
-      where: { x: number; z: number },
-      keeper: RegExp,
-      wants: RegExp[]
-    ) {
-      await bot.walkTo(where.x, where.z);
-      try {
-        await bot.openShop(keeper);
-        for (const item of wants) {
-          // Buy out whatever stock exists — the point is the chokehold.
-          try { await bot.buyFromShop(item, 10); } catch (_) {}
-        }
-        await bot.closeShop();
-      } catch (e) {
-        console.log(`[FINGERS] Sweep failed: ${(e as Error).message}`);
-      }
-    }
-
-    async function handOffToDesk() {
-      const stock = sdk.getInventory().filter((i) => TOOLS.test(i.name));
-      if (stock.length === 0) return;
-      await bot.walkTo(HUB.x, HUB.z);
-      for (const deskName of [/mule/i, /hawker/i]) {
-        const desk = sdk.findNearbyPlayer(deskName);
-        if (!desk) continue;
-        try {
-          const r = await bot.trade(desk, {
-            give: sdk
-              .getInventory()
-              .filter((i) => TOOLS.test(i.name))
-              .slice(0, 10)
-              .map((g) => ({ name: new RegExp(g.name, "i"), amount: -1 })),
-            timeout: 30_000,
-          });
-          if (r.success) {
-            handoffs++;
-            console.log(`[FINGERS] Stock handed to desk (${handoffs} total)`);
-            break;
-          }
-        } catch (_) {}
+        await bot.walkTo(MARKET.x, MARKET.z);
       }
     }
 
     // ═══════════════════════════════════════════════════════
-    console.log("[FINGERS] v3: The Mint opens — Thieving 99, every pick lands");
-    await sdk.say("the mint is open. tools soon in stock");
+    startCoins = sdk.countInventoryItems(/coins/i);
+    console.log(
+      `[FINGERS] v4: Knight's Purse expedition — departing with ${startCoins}gp`
+    );
+    await sdk.say("the mint rides west. knights of ardougne await");
+    await walkWest();
 
     while (true) {
       if (!(await isAlive())) {
-        console.log("[FINGERS] Death detected — recovering at Lumbridge");
+        console.log(
+          `[FINGERS] Death — coins survive (${sdk.countInventoryItems(/coins/i)}gp). Marching back west`
+        );
         await sdk.waitForTicks(5);
+        await walkWest();
         continue;
       }
 
-      await printGP(250);
-
-      sweeps++;
-      console.log(`[FINGERS] Sweep #${sweeps}: buying out tool stock`);
-      await sweepShop(GENERAL_STORE, /shop.*keeper/i, [
-        /^hammer$/i,
-        /tinderbox/i,
-        /chisel/i,
-        /shears/i,
-      ]);
-      await sweepShop(BOBS, /^bob$/i, [
-        /bronze pickaxe/i,
-        /bronze axe/i,
-        /iron axe/i,
-      ]);
-
-      await handOffToDesk();
-
-      // Keep a lean pack: coins + tools only
-      if (sdk.getInventory().length >= 24) {
-        try { await bot.dropItem(/bread|beer|pot|jug|bucket/i, "all"); } catch (_) {}
+      const knight = sdk.findNearbyNpc(KNIGHT);
+      if (knight) {
+        try { await bot.pickpocketNpc(knight); } catch (_) {}
+        await bot.dismissBlockingUI();
+        picks++;
+        if (picks % 50 === 0) {
+          const coins = sdk.countInventoryItems(/coins/i);
+          console.log(
+            `[FINGERS] KNIGHT-PURSE ${picks} picks, ${coins}gp (+${coins - startCoins} this expedition)`
+          );
+        }
+      } else {
+        await sdk.waitForTicks(3);
+        const st = sdk.getState()?.player;
+        if (
+          st &&
+          Math.abs(st.worldX - MARKET.x) + Math.abs(st.worldZ - MARKET.z) > 20
+        ) {
+          await bot.walkTo(MARKET.x, MARKET.z);
+        }
       }
+
+      await restIfLow();
     }
   },
   { timeout: 86_400_000 }
