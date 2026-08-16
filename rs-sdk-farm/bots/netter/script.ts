@@ -214,12 +214,13 @@ await runScript(
           delivered = await tryTradeToKing();
         }
 
-        if (!delivered) {
-          // Drop instead of trekking to a bank — keeps the cycle tight
-          // and away from the dangerous Draynor corridor.
-          console.log("[NETTER] King unavailable, dropping fish");
+        // Trust inventory, not trade status: a "successful" trade into a
+        // full KING pack transfers nothing and loops the fisher forever.
+        if (!delivered || sdk.getInventory().length >= 20) {
+          console.log("[NETTER] Fish not offloaded — dropping to reset");
           try { await bot.dropItem(/raw/i, "all"); } catch (_) {}
           try { await bot.dropItem(/shrimps/i, "all"); } catch (_) {}
+          try { await bot.dropItem(/anchovies/i, "all"); } catch (_) {}
         }
 
         deliveries++;
