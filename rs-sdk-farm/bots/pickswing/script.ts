@@ -11,6 +11,11 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
+    // Purge starter junk — dead slots shrink every haul.
+    for (const junk of [/^bronze axe$/i, /tinderbox/i, /fishing net/i, /shrimps/i, /bucket/i, /^pot$/i, /bread/i, /bronze dagger/i, /bronze sword/i, /wooden shield/i, /shortbow/i, /arrow/i]) {
+      try { await bot.dropItem(junk, "all"); } catch (_) {}
+    }
+
     const MEETING_POINT = { x: 3222, z: 3218 };
     const MINE = { x: 3285, z: 3365 };
     const VARROCK_BANK = { x: 3185, z: 3436 };
@@ -186,5 +191,5 @@ await runScript(
       }
     }
   },
-  { timeout: 7_200_000 }
+  { timeout: 86_400_000 }
 );

@@ -11,6 +11,11 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
+    // Purge starter junk — dead slots shrink every haul (keep net + shrimps).
+    for (const junk of [/^bronze axe$/i, /tinderbox/i, /bucket/i, /^pot$/i, /bread/i, /bronze dagger/i, /bronze sword/i, /wooden shield/i, /shortbow/i, /arrow/i, /pickaxe/i]) {
+      try { await bot.dropItem(junk, "all"); } catch (_) {}
+    }
+
     // Hot-fix v2: the swamp-coast spot (3267,3148) is EAST of the Al Kharid
     // toll fence — walkTo can't route there (stuck at the gate; measured).
     // Back to Draynor with the strictly-north waypoint route and NO banking

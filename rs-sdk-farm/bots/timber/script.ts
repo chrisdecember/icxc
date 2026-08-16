@@ -11,6 +11,11 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
+    // Purge starter junk — dead slots shrink every haul.
+    for (const junk of [/fishing net/i, /shrimps/i, /bucket/i, /^pot$/i, /bread/i, /bronze dagger/i, /bronze sword/i, /wooden shield/i, /shortbow/i, /arrow/i, /pickaxe/i]) {
+      try { await bot.dropItem(junk, "all"); } catch (_) {}
+    }
+
     const MEETING_POINT = { x: 3222, z: 3218 };
     const TREE_AREA = { x: 3195, z: 3220 };
     const OAK_AREA = { x: 3190, z: 3458 }; // Varrock oaks
@@ -164,5 +169,5 @@ await runScript(
       await correctDrift();
     }
   },
-  { timeout: 7_200_000 }
+  { timeout: 86_400_000 }
 );

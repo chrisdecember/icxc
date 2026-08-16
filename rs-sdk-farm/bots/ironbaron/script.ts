@@ -125,6 +125,17 @@ await runScript(
     // ═══════════════════════════════════════════════════════
     console.log("[IRONMN] The Iron Baron rides for SE Varrock");
     await sdk.say("iron baron heading to the mines");
+
+    // Purge starter-kit junk — every dead slot is ~30s of extra walking per
+    // cycle. Keep only the pickaxe.
+    for (const junk of [
+      /^bronze axe$/i, /tinderbox/i, /fishing net/i, /shrimps/i, /bucket/i,
+      /^pot$/i, /bread/i, /bronze dagger/i, /bronze sword/i, /wooden shield/i,
+      /shortbow/i, /arrow/i,
+    ]) {
+      try { await bot.dropItem(junk, "all"); } catch (_) {}
+    }
+    console.log(`[IRONMN] Pack purged, ${28 - sdk.getInventory().length} free slots`);
     await walkWaypoints(WAYPOINTS_TO_MINE);
 
     while (true) {
