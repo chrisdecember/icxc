@@ -122,6 +122,30 @@ const hubRows = [...hubTally.entries()]
   })
   .sort((a, b) => b.avg - a.avg);
 
+// Swarm status: last status block from each swarm log (header + indented rows).
+function lastStatusBlock(log: string, header: RegExp, row: RegExp): string[] {
+  const lines = readLines(`${ROOT}/logs/${log}`);
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (header.test(lines[i])) { start = i; break; }
+  }
+  if (start < 0) return [];
+  const block = [lines[start]];
+  for (let i = start + 1; i < lines.length && row.test(lines[i]); i++) block.push(lines[i]);
+  return block.map((l) => l.replace(/^\[\w+\] /, ""));
+}
+const lawBlock = lastStatusBlock("lawswarm.log", /\[lawswarm\] LAWSWARM /, /^\[lawswarm\] {3}/);
+const kickBlock = lastStatusBlock("mankickers.log", /\[mankickers\] DISRUPTION /, /^\[mankickers\] {3}/);
+const lawsHeld = Number(lawBlock[0]?.match(/laws=(\d+)/)?.[1] ?? 0);
+const kicksThrown = Number(kickBlock[0]?.match(/kicks=(\d+)/)?.[1] ?? 0);
+const fingersLine = readLines(`${ROOT}/logs/gtfingers.log`).filter((l) => /KNIGHT-PURSE/.test(l)).slice(-1)[0] ?? "";
+const fingersPicks = Number(fingersLine.match(/(\d+) picks/)?.[1] ?? 0);
+const ninjaLines = ["gtninja1", "gtninja2", "gtninja3"].map((n) => {
+  const last = readLines(`${ROOT}/logs/${n}.log`).filter((l) => /lifetime ~/.test(l)).slice(-1)[0] ?? "";
+  const m = last.match(/\[NINJA:(\w+)\].*lifetime ~(\d+)gp\/(\d+)/);
+  return m ? `${n} (${m[1]}): ~${m[2]}gp over ${m[3]} piles` : `${n}: no data`;
+});
+
 const html = `<title>Golden Throne Live Ops</title>
 <style>
 :root{--ground:#090b12;--surface:#0d0f17;--border:#1b1e2a;--gold:#c9a84c;--gold-hi:#e8cc5a;--gold-lo:#7a6530;
@@ -165,12 +189,21 @@ color:var(--text-lo);max-height:180px;overflow-y:auto;white-space:pre-wrap}
   <div class="tile"><b>${deliveries}</b><span>deliveries logged</span></div>
   <div class="tile"><b>${trades.length}</b><span>market trades</span></div>
   <div class="tile"><b>${restarts.length}</b><span>auto-restarts</span></div>
+  <div class="tile"><b>${lawsHeld}</b><span>law runes held</span></div>
+  <div class="tile"><b>${kicksThrown.toLocaleString()}</b><span>men kicked</span></div>
+  <div class="tile"><b>${fingersPicks.toLocaleString()}</b><span>knight picks</span></div>
 </div>
 <div class="grid">${fleet.map(botCard).join("\n")}</div>
 <h2>Market Intel — hub density (players, avg over ${surveys.length} surveys)</h2>
 <div class="wrap"><table><tr><th>hub</th><th>avg players</th><th>last</th><th>surveys</th></tr>
 ${hubRows.map((h) => `<tr><td>${h.hub}</td><td>${h.avg.toFixed(1)}</td><td>${h.last}</td><td>${h.n}</td></tr>`).join("")}
 </table></div>
+<h2>Law swarm — march to the dark wizard circle</h2>
+<div class="log">${lawBlock.join("\n") || "no status yet"}</div>
+<h2>Mankicker disruptors — Lumbridge pickpocket denial</h2>
+<div class="log">${kickBlock.join("\n") || "no status yet"}</div>
+<h2>Thief &amp; ninja fleet</h2>
+<div class="log">${[fingersLine.replace(/^\[\w+\] /, ""), ...ninjaLines].filter(Boolean).join("\n") || "no data"}</div>
 <h2>Recent trades</h2>
 <div class="log">${trades.slice(-12).join("\n") || "no trades yet"}</div>
 <h2>Supervisor restarts</h2>
