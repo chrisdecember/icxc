@@ -686,8 +686,15 @@ class LawBot {
                 // is fenced on its east side — the only exit is SOUTH along the
                 // sheep pen back to the road junction, then east as normal.
                 const inCabbage = px < 3228 && pz > 3265;
+                // Windmill junction (3228-3239, 3230-3246): east is fenced and
+                // the micro-oscillation there defeats the stationary detector
+                // (gtlaw02 circled it for 3 hours). Exit SOUTH to the Al Kharid
+                // road, which runs east freely.
+                const inWindmill = px >= 3228 && px <= 3239 && pz >= 3230 && pz <= 3246;
                 const eastTarget = inCabbage
                     ? { x: 3216, z: 3247 }
+                    : inWindmill
+                    ? { x: 3238, z: 3227 }
                     : { x: 3255, z: Math.max(pz, 3240) };
                 if (this.tick % 60 === 0) {
                     console.log(`[${this.name}] LUMBRIDGE-ESCAPE (${px},${pz}) -> ${inCabbage ? 'south (cabbage exit)' : 'east'}`);
