@@ -300,7 +300,11 @@ class LawBot {
         // the circle still gain combat XP by fighting men in Lumbridge. There
         // are no men near the dark-wizard circle so circle units auto-target
         // dark wizards. Ramping units (cl<10) fight men only.
-        const prey = ramping ? /^man$|^woman$/i : iceTier ? /^ice warrior$/i : /^dark wizard$|^man$|^woman$/i;
+        const farFromCircle = Math.hypot(px - this.site.x, pz - this.site.z) > 30;
+        const prey = ramping ? /^man$|^woman$/i
+            : iceTier ? /^ice warrior$/i
+            : farFromCircle ? /^dark wizard$/i
+            : /^dark wizard$|^man$|^woman$/i;
         if (this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
             if (ramping && this.tick % 40 === 0) {
                 const men = state.nearbyNpcs.filter(n => prey.test(n.name)).slice(0, 3);
