@@ -618,10 +618,35 @@ await runScript(
             await bot.walkTo(GUARD_SPOT.x, GUARD_SPOT.z);
           }
         }
+        // Magic program: Aubury (3253,3402) is 30 tiles from the guards.
+        // Restock strike runes when dry, open every kill with a Wind Strike
+        // (component 1152) — a whole new skill climbing on the same loop.
+        const magicLow =
+          sdk.countInventoryItems(/mind rune/i) < 5 ||
+          sdk.countInventoryItems(/air rune/i) < 15;
+        if (huntGuards && magicLow && totalKills % 30 === 5 &&
+            sdk.countInventoryItems(/coins/i) >= 600) {
+          console.log("[KING] Rune restock at Aubury's");
+          await bot.walkTo(3253, 3402);
+          try {
+            await bot.openShop(/aubury/i);
+            try { await bot.buyFromShop(/mind rune/i, 100); } catch (_) {}
+            try { await bot.buyFromShop(/air rune/i, 150); } catch (_) {}
+            await bot.closeShop();
+          } catch (_) {}
+          await bot.walkTo(GUARD_SPOT.x, GUARD_SPOT.z);
+        }
+
         const target = huntGuards
           ? sdk.findNearbyNpc(/^guard$/i) ?? sdk.findNearbyNpc(/^man$/i)
           : sdk.findNearbyNpc(/^cow$/i);
         if (target) {
+          if (
+            sdk.countInventoryItems(/mind rune/i) >= 1 &&
+            sdk.countInventoryItems(/air rune/i) >= 1
+          ) {
+            try { await bot.castSpell(target, 1152); } catch (_) {}
+          }
           try {
             await bot.attack(target);
           } catch (_) {}

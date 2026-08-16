@@ -46,17 +46,34 @@ await runScript(
       }
     }
 
-    async function restIfLow() {
+    // The baker's stall sits ON the market square (2654,3311) — at
+    // Thieving 99 a stall theft always lands. Free cakes beat resting.
+    const BAKER_STALL = { x: 2654, z: 3311 };
+
+    async function stealCakes(count: number) {
+      await bot.walkTo(BAKER_STALL.x, BAKER_STALL.z);
+      for (let i = 0; i < count * 3; i++) {
+        if (sdk.countInventoryItems(/cake|bread/i) >= count) break;
+        const stall = sdk.findNearbyLoc(/stall/i, { withOption: /steal/i });
+        if (!stall) { await sdk.waitForTicks(4); continue; }
+        try { await bot.interactLoc(stall, /steal/i); } catch (_) {}
+        await bot.dismissBlockingUI();
+        await sdk.waitForTicks(2);
+      }
+      await bot.walkTo(MARKET.x, MARKET.z);
+    }
+
+    async function eatOrStealIfLow() {
       const st = sdk.getState()?.player;
-      if (st && st.hp < st.maxHp * 0.5) {
-        console.log("[FINGERS] Low HP — resting off the market square");
-        await bot.walkTo(MARKET.x + 8, MARKET.z + 8);
-        while (true) {
-          const s = sdk.getState()?.player;
-          if (!s || s.hp >= s.maxHp * 0.9) break;
-          await sdk.waitForTicks(20);
+      if (!st) return;
+      if (st.hp < st.maxHp * 0.5) {
+        const food = sdk.findInventoryItem(/cake|bread/i);
+        if (food) {
+          try { await bot.eatFood(food); } catch (_) {}
+        } else {
+          console.log("[FINGERS] Low HP — raiding the baker's stall");
+          await stealCakes(3);
         }
-        await bot.walkTo(MARKET.x, MARKET.z);
       }
     }
 
@@ -100,7 +117,7 @@ await runScript(
         }
       }
 
-      await restIfLow();
+      await eatOrStealIfLow();
     }
   },
   { timeout: 86_400_000 }
