@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { runScript } from "../../sdk/runner";
 
 // FINGERS v5 — THE KNIGHT'S PURSE, sustainable edition. Thieving 99:
@@ -96,6 +97,8 @@ await runScript(
       try {
         await bot.openBank();
         await bot.depositItem(/coins/i, -1);
+        // Intercepted traffic valuables (runes/gems) bank alongside.
+        try { await bot.depositItem(/rune|gem|sapphire|emerald|ruby|diamond/i, -1); } catch (_) {}
         await bot.closeBank();
         console.log("[FINGERS] Treasury secured");
       } catch (e) {
@@ -139,6 +142,39 @@ await runScript(
       }
     }
 
+    // The knights square is the likeliest REAL trafficking hub on the
+    // server — nick's 21-bot thieving fleet earns here, and drop-transfer
+    // collector patterns dump coin stacks where the workers stand. We're
+    // on this square all day anyway: log every >=100gp pile as traffic
+    // intel and eat the coin piles (they stack — zero slot cost).
+    const INTEL_PATH = new URL("../../logs/pile-intel.jsonl", import.meta.url).pathname;
+    const seenPiles = new Set<string>();
+
+    async function ardyPileWatch() {
+      if (!nearArdougne()) return;
+      const piles = (sdk.getGroundItems() as any[])
+        .filter((g) => /coins|rune|gem|sapphire|emerald|ruby|diamond/i.test(g.name));
+      for (const p of piles) {
+        const n = p.count ?? 1;
+        const est = /^coins$/i.test(p.name) ? n : n * 100;
+        if (est < 100) continue;
+        const key = `${p.name}@${p.x},${p.z}:${n}`;
+        if (seenPiles.has(key)) continue;
+        seenPiles.add(key);
+        if (seenPiles.size > 400) seenPiles.clear();
+        console.log(
+          `[FINGERS] ARDY-TRAFFIC ${p.name} x${n} (~${est}gp) @ (${p.x},${p.z}) — collector pile on the knight square`
+        );
+        try {
+          appendFileSync(INTEL_PATH, JSON.stringify({
+            ts: new Date().toISOString(), region: "ardougne", event: "sight",
+            traffic: true, zone: "knights-square", name: p.name, n, x: p.x, z: p.z, est,
+          }) + "\n");
+        } catch (_) {}
+        try { await bot.pickupItem(p); } catch (_) {}
+      }
+    }
+
     // ═══════════════════════════════════════════════════════
     startCoins = sdk.countInventoryItems(/coins/i);
     console.log(
@@ -166,6 +202,7 @@ await runScript(
         try { await bot.pickpocketNpc(knight); } catch (_) {}
         await bot.dismissBlockingUI();
         picks++;
+        if (picks % 10 === 0) await ardyPileWatch();
         if (picks % 50 === 0) {
           const coins = sdk.countInventoryItems(/coins/i);
           const cakes = sdk.countInventoryItems(/cake|bread/i);
@@ -176,6 +213,7 @@ await runScript(
         }
       } else {
         await sdk.waitForTicks(3);
+        await ardyPileWatch();
         const st = sdk.getState()?.player;
         if (
           st &&

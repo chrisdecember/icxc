@@ -3,9 +3,10 @@ import { runScript } from "../../sdk/runner";
 // BLADE — law-rune combat farmer. Wizards drop law runes (1/128) and a
 // spread of other runes; a pair of blades compounding kills is the
 // fleet's sustainable law source until runecrafting is proven. Ramp:
-// cows until combat ~20 (fast on the accelerated curve), then park at
-// the wizard spawn west of Lumbridge (3148,3200) forever: kill, loot
-// every rune, bury bones, rest-regen when low, bank laws at Draynor.
+// cows until combat ~20, then the WIZARDS' TOWER south of Draynor.
+// (3148,3200) was the TUTOR ROW — a Talk-to-only "Wizard" (cl=0, no
+// Attack option) that both blades swung at for an hour, every failure
+// eaten by the catch. Probe proved it. Tower wizards are attackable.
 
 await runScript(
   async (ctx) => {
@@ -15,7 +16,7 @@ await runScript(
 
     const COW_FIELD = { x: 3253, z: 3290 };
     const COW_GATE = { x: 3253, z: 3266 };
-    const WIZARDS = { x: 3148, z: 3200 };
+    const WIZARDS = { x: 3109, z: 3161 }; // Wizards' Tower ground floor
     const DRAYNOR_BANK = { x: 3092, z: 3243 };
 
     let kills = 0;
@@ -133,7 +134,7 @@ await runScript(
         if (onWizards) console.log("[BLADE] On station at the wizard spawn");
       }
 
-      const target = sdk.findNearbyNpc(prey);
+      const target = sdk.findNearbyNpc(prey, { withOption: /attack/i });
       if (target) {
         try { await bot.attack(target); } catch (_) {}
         await sdk.waitForTicks(4);

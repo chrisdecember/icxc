@@ -15,7 +15,14 @@ import { runScript } from "../../sdk/runner";
 // Every pile sighted or taken is recorded to logs/pile-intel.jsonl —
 // the map of where the server's drop trafficking actually happens.
 
-type Zone = { name: string; x: number; z: number; gp: number; visits: number; last: number };
+// A pile >= this estimated gp is a TRAFFIC candidate — a worker bot's
+// dumped stack for a collector — vs combat-leftover scrap. The first
+// 93-pile haul averaged 8gp/pile: pure scrap. Trafficking piles are
+// deliberate transfers and run 100s-1000s gp, at pickpocket/gathering
+// clusters (no corpses), not at combat camps where drops are just deaths.
+const TRAFFIC_MIN = 100;
+
+type Zone = { name: string; x: number; z: number; gp: number; trafficGp: number; visits: number; last: number };
 type Region = {
   banks: Array<{ x: number; z: number }>;
   zones: Array<{ name: string; x: number; z: number }>;
@@ -93,7 +100,7 @@ export function runNinja(regionKey: keyof typeof REGIONS) {
       try { await sdk.waitForReady(120_000); } catch (_) {}
       await bot.skipTutorial();
 
-      const zones: Zone[] = region.zones.map((z) => ({ ...z, gp: 0, visits: 0, last: 0 }));
+      const zones: Zone[] = region.zones.map((z) => ({ ...z, gp: 0, trafficGp: 0, visits: 0, last: 0 }));
       let hop = 0;
       let grabbed = 0;
       let gpTaken = 0;
@@ -120,7 +127,9 @@ export function runNinja(regionKey: keyof typeof REGIONS) {
         if (hop % 4 === 0) {
           return zones.slice().sort((a, b) => a.last - b.last)[0]!;
         }
-        const weights = zones.map((z) => z.gp / Math.max(1, z.visits) + 80);
+        // Traffic value drives targeting 8x harder than scrap value — we
+        // are hunting collector routes, not tidying battlefields.
+        const weights = zones.map((z) => (z.trafficGp * 8 + z.gp) / Math.max(1, z.visits) + 80);
         let roll = Math.random() * weights.reduce((a, b) => a + b, 0);
         for (let i = 0; i < zones.length; i++) {
           roll -= weights[i]!;
@@ -178,11 +187,17 @@ export function runNinja(regionKey: keyof typeof REGIONS) {
           const after = sdk.countInventoryItems(/coins/i);
           const n = (pile as any).count ?? 1;
           const est = /^coins$/i.test(pile.name) ? Math.max(0, after - before) : unitValue(pile.name) * n;
+          const traffic = est >= TRAFFIC_MIN;
           grabbed++;
           gpTaken += est;
           zone.gp += est;
-          console.log(`${TAG} HOOVER ${pile.name} (~${est}gp) @ (${pile.x},${pile.z}) ${zone.name} — lifetime ~${gpTaken}gp/${grabbed} piles`);
-          intel({ event: "take", zone: zone.name, name: pile.name, n, x: pile.x, z: pile.z, est });
+          if (traffic) {
+            zone.trafficGp += est;
+            console.log(`${TAG} TRAFFIC-INTERCEPT ${pile.name} x${n} (~${est}gp) @ (${pile.x},${pile.z}) ${zone.name} — collector route suspected here`);
+          } else {
+            console.log(`${TAG} scavenge ${pile.name} (~${est}gp) @ (${pile.x},${pile.z}) ${zone.name} — lifetime ~${gpTaken}gp/${grabbed}`);
+          }
+          intel({ event: "take", traffic, zone: zone.name, name: pile.name, n, x: pile.x, z: pile.z, est });
 
           // Bank by VALUE, not just slots — coins stack into one slot and
           // v2's slot-only trigger meant the haul rode into every death.
@@ -206,10 +221,10 @@ export function runNinja(regionKey: keyof typeof REGIONS) {
         await sdk.waitForTicks(2);
         await workZone(zone, 60);
         if (hop % 8 === 0) {
-          const top = zones.slice().sort((a, b) => b.gp - a.gp).slice(0, 3)
-            .map((z) => `${z.name} ~${z.gp}gp/${z.visits}v`).join(", ");
+          const top = zones.slice().sort((a, b) => (b.trafficGp * 8 + b.gp) - (a.trafficGp * 8 + a.gp)).slice(0, 3)
+            .map((z) => `${z.name} traffic:${z.trafficGp}gp scrap:${z.gp}gp/${z.visits}v`).join(", ");
           console.log(`${TAG} INTEL top: ${top}`);
-          intel({ event: "summary", zones: zones.map((z) => ({ n: z.name, gp: z.gp, v: z.visits })) });
+          intel({ event: "summary", zones: zones.map((z) => ({ n: z.name, gp: z.gp, traffic: z.trafficGp, v: z.visits })) });
         }
       }
     },
