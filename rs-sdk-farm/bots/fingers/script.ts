@@ -88,6 +88,7 @@ await runScript(
     // holding shopping money and kept only gear). The treasury banks at
     // Ardougne south — pocket change only on the street.
     async function bankTreasury(keepPocket = 200) {
+      if (!nearArdougne()) return;
       const coins = sdk.countInventoryItems(/coins/i);
       if (coins <= keepPocket + 300) return;
       console.log(`[FINGERS] Banking treasury: ${coins}gp`);
@@ -103,38 +104,38 @@ await runScript(
       await bot.walkTo(MARKET.x, MARKET.z);
     }
 
-    // The baker's stall sits ON the market square (2654,3311) — at
-    // Thieving 99 a stall theft always lands. Free cakes beat resting.
-    const BAKER_STALL = { x: 2654, z: 3311 };
+    // NO STALL THEFT. Field death #2: stealing the baker's stall aggroed
+    // the East Ardougne guards, who beat FINGERS to death at full hp (the
+    // Attack XP on the sample was auto-retaliate). Sustain comes from
+    // resting OFF the square instead — slower than cake, but deathless.
+    const REST_SPOT = { x: 2661, z: 3288 }; // south alley, out of aggro
 
-    async function stealCakes(count: number) {
-      await bot.walkTo(BAKER_STALL.x, BAKER_STALL.z);
-      for (let i = 0; i < count * 3; i++) {
-        if (sdk.countInventoryItems(/cake|bread/i) >= count) break;
-        const stall = sdk.findNearbyLoc(/stall/i, { withOption: /steal/i });
-        if (!stall) { await sdk.waitForTicks(4); continue; }
-        try { await bot.interactLoc(stall, /steal/i); } catch (_) {}
-        await bot.dismissBlockingUI();
-        await sdk.waitForTicks(2);
-      }
-      await bot.walkTo(MARKET.x, MARKET.z);
+    // Every helper must refuse to run far from Ardougne: after a death,
+    // a helper's trailing walkTo(MARKET) from Lumbridge silently walks
+    // the whole country (and the wolf pass) with no rest logic. Let the
+    // main loop's death branch own the remarch instead.
+    function nearArdougne() {
+      const st = sdk.getState()?.player;
+      if (!st) return false;
+      return Math.abs(st.worldX - MARKET.x) + Math.abs(st.worldZ - MARKET.z) < 150;
     }
 
-    async function eatOrStealIfLow() {
+    async function eatOrRestIfLow() {
       const st = sdk.getState()?.player;
-      if (!st) return;
-      // Sustainable farm rule: eat EARLY (70%) — knight stuns chip 3hp and
-      // max HP here is tiny; waiting for 50% was the death-cycle.
-      if (st.hp < st.maxHp * 0.7) {
-        const food = sdk.findInventoryItem(/cake|bread/i);
-        if (food) {
-          try { await bot.eatFood(food); } catch (_) {}
-        }
+      if (!st || !nearArdougne()) return;
+      const food = sdk.findInventoryItem(/cake|bread/i);
+      if (st.hp < st.maxHp * 0.7 && food) {
+        try { await bot.eatFood(food); } catch (_) {}
+        return;
       }
-      // Proactive stocking: never work the square with fewer than 2 cakes.
-      if (sdk.countInventoryItems(/cake|bread/i) < 2) {
-        console.log("[FINGERS] Restocking cakes from the baker's stall");
-        await stealCakes(4);
+      // Under half with no food: step off the square and regen. Knights
+      // stun for 3 at worst; entering fights only above 80% keeps the
+      // floor safe with maxHp this small.
+      if (st.hp < st.maxHp * 0.5) {
+        console.log(`[FINGERS] Low (${st.hp}/${st.maxHp}) — resting off-square`);
+        await bot.walkTo(REST_SPOT.x, REST_SPOT.z);
+        await restUntilHp(0.85);
+        await bot.walkTo(MARKET.x, MARKET.z);
       }
     }
 
@@ -184,7 +185,7 @@ await runScript(
         }
       }
 
-      await eatOrStealIfLow();
+      await eatOrRestIfLow();
     }
   },
   { timeout: 86_400_000 }
