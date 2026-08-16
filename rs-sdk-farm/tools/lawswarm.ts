@@ -248,7 +248,11 @@ class LawBot {
 
         // Opportunistic attack: check for attackable targets BEFORE stuck-
         // escape — a unit jittering near men can still train combat.
-        const prey = ramping ? /^man$|^woman$/i : iceTier ? /^ice warrior$/i : /^dark wizard$/i;
+        // Non-ramping units target dark wizards AND men — units stuck far from
+        // the circle still gain combat XP by fighting men in Lumbridge. There
+        // are no men near the dark-wizard circle so circle units auto-target
+        // dark wizards. Ramping units (cl<10) fight men only.
+        const prey = ramping ? /^man$|^woman$/i : iceTier ? /^ice warrior$/i : /^dark wizard$|^man$|^woman$/i;
         if (this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
             if (ramping && this.tick % 40 === 0) {
                 const men = state.nearbyNpcs.filter(n => prey.test(n.name)).slice(0, 3);
@@ -270,16 +274,19 @@ class LawBot {
                 const opt = opportunistic.optionsWithIndex.find(o => /attack/i.test(o.text))!;
                 this.exec({ type: 'interactNpc', npcIndex: opportunistic.index, optionIndex: opt.opIndex, reason: 'attack' });
                 this.lastAttackTick = this.tick;
-                if (this.lastFailure) console.log(`[${this.name}] COMBAT ${opportunistic.name} (was stuck, now fighting)`);
-                this.lastFailure = '';
-                this.escapeTries = 0;
-                return;
+                if (!this.lastFailure) {
+                    this.escapeTries = 0;
+                    return;
+                }
+                if (this.tick % 40 === 0) {
+                    console.log(`[${this.name}] ATTACK-BLOCKED ${opportunistic.name} reach=${opportunistic.reachable} d=${opportunistic.distance} fail=${this.lastFailure}`);
+                }
             }
         }
 
         // Stuck-escape: open closed doors/gates if reachable, otherwise jitter.
         // out_of_range = BFS build-area too small to reach target; needs jitter too.
-        if (/client_rejected|out_of_range/.test(this.lastFailure)) {
+        if (/client_rejected|out_of_range|cant_reach/.test(this.lastFailure)) {
             this.escapeTries++;
             if (this.escapeTries > 20) {
                 this.lastFailure = '';
