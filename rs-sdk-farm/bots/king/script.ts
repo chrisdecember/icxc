@@ -601,8 +601,9 @@ await runScript(
           }
         }
 
-        // ── Cowhide tanning side-quest every ~20 kills ──
-        if (hidesSinceTanning >= 20 && sdk.countInventoryItems(/cowhide/i) >= 5) {
+        // ── Cowhide tanning side-quest DISABLED: the Al Kharid toll gate
+        //    is impassable to walkTo (dialog toll) and risks stranding KING.
+        if (false && hidesSinceTanning >= 20 && sdk.countInventoryItems(/cowhide/i) >= 5) {
           const atkLevel = sdk.getSkill("Attack")?.level ?? 0;
           // Only attempt if we have enough combat level to survive the walk
           if (atkLevel >= 5) {
@@ -675,11 +676,9 @@ await runScript(
         const elapsedCombatMin =
           (Date.now() - phaseStartTime) / (1000 * 60);
         const atkLevel = sdk.getSkill("Attack")?.level ?? 0;
-        if (elapsedCombatMin >= 30 && atkLevel >= 10) {
-          console.log(
-            `[KING] ${elapsedCombatMin.toFixed(0)} min of combat, ` +
-              `Attack ${atkLevel} -- escalating to Al Kharid warriors`
-          );
+        // Al Kharid escalation DISABLED: toll gate is impassable to walkTo.
+        // Cows + zero downtime + close deliveries beats warriors + overhead.
+        if (false && elapsedCombatMin >= 30 && atkLevel >= 10) {
           break;
         }
       }

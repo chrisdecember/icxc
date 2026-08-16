@@ -13,8 +13,10 @@ await runScript(
 
     const MEETING_POINT = { x: 3222, z: 3218 };
     const LUMBRIDGE_MEN = { x: 3222, z: 3218 };
-    const AL_KHARID_WARRIORS = { x: 3293, z: 3170 };
-    const AL_KHARID_BANK = { x: 3269, z: 3167 };
+    // Al Kharid toll gate is impassable to walkTo (dialog toll); Varrock guards
+    // are the canonical Thieving-40 target and gate-free.
+    const AL_KHARID_WARRIORS = { x: 3207, z: 3381 }; // Varrock south gate guards
+    const AL_KHARID_BANK = { x: 3185, z: 3441 }; // Varrock West bank
     const KEBAB_SELLER = { x: 3273, z: 3180 };
     const DRAYNOR_BANK = { x: 3092, z: 3243 };
 
@@ -146,30 +148,27 @@ await runScript(
       const skill = sdk.getSkill("Thieving");
 
       if (skill && skill.level >= 40 && !inAlKharid) {
-        console.log("[FINGERS] Upgrading to Al Kharid warriors");
-        await bot.walkTo(3268, 3228);
-        try {
-          await bot.interactLoc(/gate/i, /pay/i);
-          await bot.navigateDialog([1]);
-          await bot.waitForDialogClose();
-        } catch (_) {
-          try { await bot.walkTo(3277, 3227); } catch (_) {}
-        }
+        console.log("[FINGERS] Upgrading to Varrock guards");
         await bot.walkTo(AL_KHARID_WARRIORS.x, AL_KHARID_WARRIORS.z);
         inAlKharid = true;
-        await buyKebabs(10);
         continue;
       }
 
       if (inAlKharid) {
         try {
-          await bot.pickpocketNpc(/al.kharid warrior/i);
+          await bot.pickpocketNpc(/^guard$/i);
         } catch (_) {}
         await bot.dismissBlockingUI();
         await eatIfLow(0.4);
 
-        if (!sdk.findInventoryItem(/kebab/i)) {
-          await buyKebabs(10);
+        const st = sdk.getState();
+        if (
+          st?.player &&
+          Math.abs(st.player.worldX - AL_KHARID_WARRIORS.x) +
+            Math.abs(st.player.worldZ - AL_KHARID_WARRIORS.z) >
+            25
+        ) {
+          await bot.walkTo(AL_KHARID_WARRIORS.x, AL_KHARID_WARRIORS.z);
         }
 
         if (sdk.countInventoryItems(/coins/i) > 300) {

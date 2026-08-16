@@ -11,22 +11,21 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
+    // Hot-fix: Draynor route kept killing the fisher (aggressive dark
+    // wizards). Relocated to the verified-safe shrimp spot SE of Lumbridge
+    // swamp (3267, 3148) — closer to the meeting point, no wizard zone.
     const MEETING_POINT = { x: 3222, z: 3218 };
-    const DRAYNOR_FISH = { x: 3087, z: 3230 };
-    const PORT_SARIM_SHOP = { x: 3014, z: 3224 };
-    const DRAYNOR_BANK = { x: 3092, z: 3243 };
+    const DRAYNOR_FISH = { x: 3267, z: 3148 };
+    const DRAYNOR_BANK = { x: 3092, z: 3243 }; // unused fallback retained
 
-    // Avoid dark wizards near (3220, 3220)
     const SAFE_TO_DRAYNOR = [
-      { x: 3200, z: 3240 },
-      { x: 3150, z: 3250 },
-      { x: 3100, z: 3240 },
-      { x: 3087, z: 3230 },
+      { x: 3222, z: 3195 },
+      { x: 3240, z: 3160 },
+      { x: 3267, z: 3148 },
     ];
     const SAFE_TO_LUMBRIDGE = [
-      { x: 3100, z: 3250 },
-      { x: 3150, z: 3260 },
-      { x: 3200, z: 3240 },
+      { x: 3240, z: 3160 },
+      { x: 3222, z: 3195 },
       { x: 3222, z: 3218 },
     ];
 
@@ -120,43 +119,26 @@ await runScript(
     }
 
     // ═══════════════════════════════════════════════════════
-    //  PHASE 1: ACQUIRE FISHING NET
+    //  PHASE 1: VERIFY NET (starter kit includes one)
     // ═══════════════════════════════════════════════════════
-    console.log("[NETTER] Phase 1: Acquiring fishing net");
+    console.log("[NETTER] Phase 1: Checking gear");
     await sdk.say("netter gearing up");
-    await bot.walkTo(MEETING_POINT.x, MEETING_POINT.z);
-
-    for (let i = 0; i < 8; i++) {
-      try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
-      await bot.dismissBlockingUI();
-    }
-
-    console.log("[NETTER] Walking to Port Sarim for fishing net");
-    await walkWaypoints(SAFE_TO_DRAYNOR);
-    await bot.walkTo(3040, 3230);
-    await bot.walkTo(PORT_SARIM_SHOP.x, PORT_SARIM_SHOP.z);
-
-    try {
-      await bot.openShop(/gerrant/i);
-      await bot.buyFromShop(/small fishing net/i, 1);
-      await bot.closeShop();
-    } catch (_) {
+    if (!sdk.findInventoryItem(/fishing net/i)) {
+      console.log("[NETTER] No net in starter kit — buying at Lumbridge store");
+      await bot.walkTo(3212, 3247);
       try {
-        const shopkeeper = sdk.findNearbyNpc(/shop/i);
-        if (shopkeeper) {
-          await bot.openShop(shopkeeper);
-          await bot.buyFromShop(/net/i, 1);
-          await bot.closeShop();
-        }
+        await bot.openShop(/shop.*keeper/i);
+        await bot.buyFromShop(/net/i, 1);
+        await bot.closeShop();
       } catch (_) {}
     }
 
     // ═══════════════════════════════════════════════════════
-    //  PHASE 2: FISH FOREVER — net shrimp at Draynor
+    //  PHASE 2: FISH FOREVER — shrimp at the safe swamp coast
     // ═══════════════════════════════════════════════════════
-    console.log("[NETTER] Phase 2: Fishing at Draynor");
-    await bot.walkTo(DRAYNOR_FISH.x, DRAYNOR_FISH.z);
-    await sdk.say("netter fishing at draynor");
+    console.log("[NETTER] Phase 2: Fishing at swamp coast (3267,3148)");
+    await walkWaypoints(SAFE_TO_DRAYNOR);
+    await sdk.say("netter fishing at the swamp coast");
 
     while (true) {
       if (!(await isAlive())) {
@@ -176,8 +158,11 @@ await runScript(
         const delivered = await tryTradeToKing();
 
         if (!delivered) {
-          await walkWaypoints(SAFE_TO_DRAYNOR);
-          await bankFish();
+          // Drop instead of trekking to a bank — keeps the cycle tight
+          // and away from the dangerous Draynor corridor.
+          console.log("[NETTER] King unavailable, dropping fish");
+          try { await bot.dropItem(/raw/i, "all"); } catch (_) {}
+          try { await bot.dropItem(/shrimps/i, "all"); } catch (_) {}
         }
 
         deliveries++;
