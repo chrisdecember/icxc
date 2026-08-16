@@ -99,10 +99,16 @@ await runScript(
         await bot.walkTo(VAULT.x, VAULT.z);
         continue;
       }
+      // Manual research finding: there's no meaningful merch area besides
+      // (maybe) Lumbridge spawn — agents don't trade at the wizard circle.
+      // So the buying desk here was dead weight. The monopoly is a
+      // PRODUCTION monopoly: we collect everything WE farm and bank it.
+      // Pure collect + bank now; a light buy presence lives on the
+      // Lumbridge mules where the only traffic actually is.
       await hooverPiles();
       await bankIfFull();
-      await earnFloat(400);
-      await buyingDesk(3);
+      // Stay put and keep hoovering — the swarm/blades drop here.
+      await sdk.waitForTicks(4);
     }
   },
   { timeout: 86_400_000 }

@@ -31,6 +31,7 @@ await runScript(
 
     const ADS = [
       "TOOL DESK: axes picks hammers tinderboxes nets -- trade anything",
+      "BUYING LAW RUNES — trade tools/hides for your laws, here at spawn",
       "died and lost your tools? we have them. goods or coins accepted",
       "hides bones and TOOLS in stock -- the swarm supplies the swarm",
     ];
