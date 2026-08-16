@@ -57,11 +57,11 @@ const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|new
 // to avoid the obstacles that trap BFS-limited lite clients.
 const MARCH_WAYPOINTS = [
     { x: 3245, z: 3235 },  // NE of Lumbridge, open ground
-    { x: 3265, z: 3255 },  // East, clear of farm gate at (3213,3261)
-    { x: 3275, z: 3300 },  // North along east corridor (well east of cabbage patch)
-    { x: 3282, z: 3340 },  // Well east of all fence clusters
-    { x: 3285, z: 3365 },  // Far east, clear of bullrush/tree barrier at z≈3355
-    { x: 3280, z: 3380 },  // North past all barriers
+    { x: 3290, z: 3245 },  // Far east, south of farm (bypass daisy/potato trap)
+    { x: 3290, z: 3310 },  // North along far-east edge (no fences)
+    { x: 3282, z: 3340 },  // Northwest, open area
+    { x: 3285, z: 3365 },  // North
+    { x: 3280, z: 3380 },  // North past barriers
     { x: 3235, z: 3374 },  // West approach to circle
 ];
 
@@ -568,6 +568,7 @@ class LawBot {
                     const ex = Math.min(px + 15, 3290);
                     const ez = Math.min(pz + 8, wp.z);
                     this.exec({ type: 'walkTo', x: ex, z: ez, running: true, reason: 'march-force-east' });
+                    this.lastFailure = '';
                     if (wpStall % 60 === 1) {
                         console.log(`[${this.name}] MARCH-FORCE-EAST stall=${wpStall} at (${px},${pz}) -> (${ex},${ez})`);
                     }
