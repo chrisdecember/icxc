@@ -85,6 +85,7 @@ class LawBot {
     private staleZ = -1;
     private staleSince = 0;
     private marchWp = -1;
+    private marchWpSince = 0;
 
     laws = 0;
     xpGained = 0;
@@ -538,6 +539,7 @@ class LawBot {
                     if (d < bestDist) { bestDist = d; bestIdx = i; }
                 }
                 this.marchWp = bestDist < 12 ? Math.min(bestIdx + 1, MARCH_WAYPOINTS.length) : bestIdx;
+                this.marchWpSince = this.tick;
             }
             const wpIdx = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
             const wp = this.marchWp >= MARCH_WAYPOINTS.length ? anchor : MARCH_WAYPOINTS[wpIdx];
@@ -545,27 +547,30 @@ class LawBot {
 
             if (distToWp < 10 && this.marchWp < MARCH_WAYPOINTS.length) {
                 this.marchWp++;
+                this.marchWpSince = this.tick;
                 console.log(`[${this.name}] WAYPOINT ${this.marchWp}/${MARCH_WAYPOINTS.length} reached at (${px},${pz})`);
             }
 
+            const wpStall = this.tick - this.marchWpSince;
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
             if (this.tick % 60 === 0) {
-                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length}`);
+                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length} stall=${wpStall}`);
             }
 
-            const stuckTicks = this.tick - this.staleSince;
-            if (stuckTicks > 40) {
-                const jx = (4 + this.tick % 7) * (this.tick % 3 === 0 ? 1 : -1);
-                const jz = (4 + (this.tick * 5) % 7) * (this.tick % 5 < 2 ? 1 : -1);
-                this.exec({ type: 'walkTo', x: px + jx, z: pz + jz, running: true, reason: 'march-jitter' });
-                if (stuckTicks % 40 === 1) {
-                    console.log(`[${this.name}] MARCH-STUCK ${stuckTicks}t at (${px},${pz})`);
+            if (wpStall > 200) {
+                const ex = Math.min(px + 15, 3290);
+                const ez = Math.min(pz + 8, wp.z);
+                this.exec({ type: 'walkTo', x: ex, z: ez, running: true, reason: 'march-force-east' });
+                if (wpStall % 60 === 1) {
+                    console.log(`[${this.name}] MARCH-FORCE-EAST stall=${wpStall} at (${px},${pz}) -> (${ex},${ez})`);
                 }
-            } else {
-                const moved = this.walkToward(px, pz, wp.x, wp.z, 'march');
-                if (!moved) {
-                    this.lastFailure = 'march:cant_reach';
-                }
+                this.waitTicks = 3;
+                return;
+            }
+
+            const moved = this.walkToward(px, pz, wp.x, wp.z, 'march');
+            if (!moved) {
+                this.lastFailure = 'march:cant_reach';
             }
             this.waitTicks = 2;
             return;
