@@ -176,6 +176,25 @@ await runScript(
       console.log(
         `[KING] Self-mining: ${copperTarget} copper + ${tinTarget} tin`
       );
+
+      // A death strips the pickaxe — mining without one spins forever.
+      if (!sdk.findInventoryItem(/pickaxe/i)) {
+        console.log("[KING] No pickaxe — rebuying at Bob's");
+        if (sdk.countInventoryItems(/coins/i) < 5) {
+          await bot.walkTo(3232, 3218);
+          for (let i = 0; i < 40 && sdk.countInventoryItems(/coins/i) < 20; i++) {
+            try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
+            await bot.dismissBlockingUI();
+          }
+        }
+        await bot.walkTo(3230, 3203);
+        try {
+          await bot.openShop(/^bob$/i);
+          await bot.buyFromShop(/bronze pickaxe/i, 1);
+          await bot.closeShop();
+        } catch (_) {}
+      }
+
       await walkWaypoints(WAYPOINTS_TO_MINE);
 
       while (
@@ -270,6 +289,20 @@ await runScript(
     // ═════════════════════════════════════════════════════════
     try {
       console.log("[KING] Phase 2: Shopping spree");
+
+      // Death-recovery self-heal: dying strips tools AND coins. If we're
+      // broke, pickpocket men until we can afford the full toolkit (~60gp).
+      if (sdk.countInventoryItems(/coins/i) < 120) {
+        console.log("[KING] Broke — pickpocketing for tool money");
+        await bot.walkTo(3232, 3218);
+        let picks = 0;
+        while (sdk.countInventoryItems(/coins/i) < 120 && picks < 150) {
+          try { await bot.pickpocketNpc(/^man$/i); } catch (_) {}
+          await bot.dismissBlockingUI();
+          picks++;
+        }
+        console.log(`[KING] Tool money: ${sdk.countInventoryItems(/coins/i)}gp`);
+      }
 
       // General store: hammer + tinderbox
       await bot.walkTo(3212, 3247);
@@ -965,5 +998,5 @@ await runScript(
     console.log(`[KING] Total kills: ${totalKills}`);
     console.log("[KING] The king's reign is complete.");
   },
-  { timeout: 7_200_000 }
+  { timeout: 86_400_000 }
 );

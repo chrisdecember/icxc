@@ -11,21 +11,24 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    // Hot-fix: Draynor route kept killing the fisher (aggressive dark
-    // wizards). Relocated to the verified-safe shrimp spot SE of Lumbridge
-    // swamp (3267, 3148) — closer to the meeting point, no wizard zone.
+    // Hot-fix v2: the swamp-coast spot (3267,3148) is EAST of the Al Kharid
+    // toll fence — walkTo can't route there (stuck at the gate; measured).
+    // Back to Draynor with the strictly-north waypoint route and NO banking
+    // (drop-only fallback) — the 3 earlier deaths clustered on the bank leg.
     const MEETING_POINT = { x: 3222, z: 3218 };
-    const DRAYNOR_FISH = { x: 3267, z: 3148 };
+    const DRAYNOR_FISH = { x: 3087, z: 3230 };
     const DRAYNOR_BANK = { x: 3092, z: 3243 }; // unused fallback retained
 
     const SAFE_TO_DRAYNOR = [
-      { x: 3222, z: 3195 },
-      { x: 3240, z: 3160 },
-      { x: 3267, z: 3148 },
+      { x: 3230, z: 3270 },
+      { x: 3150, z: 3250 },
+      { x: 3100, z: 3245 },
+      { x: 3087, z: 3230 },
     ];
     const SAFE_TO_LUMBRIDGE = [
-      { x: 3240, z: 3160 },
-      { x: 3222, z: 3195 },
+      { x: 3100, z: 3245 },
+      { x: 3150, z: 3250 },
+      { x: 3230, z: 3270 },
       { x: 3222, z: 3218 },
     ];
 
@@ -174,5 +177,5 @@ await runScript(
       await correctDrift();
     }
   },
-  { timeout: 7_200_000 }
+  { timeout: 86_400_000 }
 );

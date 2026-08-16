@@ -13,8 +13,8 @@ await runScript(
 
     const MEETING_POINT = { x: 3222, z: 3218 };
     const LUMBRIDGE_MEN = { x: 3222, z: 3218 };
-    // Al Kharid toll gate is impassable to walkTo (dialog toll); Varrock guards
-    // are the canonical Thieving-40 target and gate-free.
+    // Hot-fix: Al Kharid toll gate is impassable to walkTo (dialog toll).
+    // Varrock guards are the proper Thieving-40 target and gate-free.
     const AL_KHARID_WARRIORS = { x: 3207, z: 3381 }; // Varrock south gate guards
     const AL_KHARID_BANK = { x: 3185, z: 3441 }; // Varrock West bank
     const KEBAB_SELLER = { x: 3273, z: 3180 };
@@ -147,16 +147,27 @@ await runScript(
 
       const skill = sdk.getSkill("Thieving");
 
+      // Stranded-side detection: the toll fence at x=3268 is one-way for
+      // walkTo. If we're already east of it (inside Al Kharid), work the
+      // warriors there — never path west through the gate.
+      const side = sdk.getState()?.player;
+      const insideAlKharid = !!side && side.worldX >= 3269;
+      const WORK = insideAlKharid
+        ? { x: 3293, z: 3170, npc: /al.kharid warrior|warrior/i }
+        : { x: AL_KHARID_WARRIORS.x, z: AL_KHARID_WARRIORS.z, npc: /^guard$/i };
+
       if (skill && skill.level >= 40 && !inAlKharid) {
-        console.log("[FINGERS] Upgrading to Varrock guards");
-        await bot.walkTo(AL_KHARID_WARRIORS.x, AL_KHARID_WARRIORS.z);
+        console.log(
+          `[FINGERS] Upgrading to ${insideAlKharid ? "Al Kharid warriors (stranded east)" : "Varrock guards"}`
+        );
+        await bot.walkTo(WORK.x, WORK.z);
         inAlKharid = true;
         continue;
       }
 
       if (inAlKharid) {
         try {
-          await bot.pickpocketNpc(/^guard$/i);
+          await bot.pickpocketNpc(WORK.npc);
         } catch (_) {}
         await bot.dismissBlockingUI();
         await eatIfLow(0.4);
@@ -164,11 +175,11 @@ await runScript(
         const st = sdk.getState();
         if (
           st?.player &&
-          Math.abs(st.player.worldX - AL_KHARID_WARRIORS.x) +
-            Math.abs(st.player.worldZ - AL_KHARID_WARRIORS.z) >
+          Math.abs(st.player.worldX - WORK.x) +
+            Math.abs(st.player.worldZ - WORK.z) >
             25
         ) {
-          await bot.walkTo(AL_KHARID_WARRIORS.x, AL_KHARID_WARRIORS.z);
+          await bot.walkTo(WORK.x, WORK.z);
         }
 
         if (sdk.countInventoryItems(/coins/i) > 300) {
@@ -188,5 +199,5 @@ await runScript(
       }
     }
   },
-  { timeout: 7_200_000 }
+  { timeout: 86_400_000 }
 );
