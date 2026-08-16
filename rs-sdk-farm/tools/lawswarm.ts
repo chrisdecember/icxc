@@ -237,7 +237,9 @@ class LawBot {
         const atk = state.skills.find(s => /^attack/i.test(s.name))?.level ?? 1;
         const str = state.skills.find(s => /strength/i.test(s.name))?.level ?? 1;
         const def = state.skills.find(s => /defence/i.test(s.name))?.level ?? 1;
-        this.cl = Math.floor((atk + str + def + (maxHp || 10)) / 4);
+        if (hp > 0) {
+            this.cl = Math.max(this.cl, Math.floor((atk + str + def + (maxHp || 10)) / 4));
+        }
 
         const xp = this.combatXp(state);
         if (this.xpBase < 0 && xp > 0) this.xpBase = xp;
@@ -363,6 +365,18 @@ class LawBot {
                 return;
             }
 
+            // Lumbridge-zone escape: when stuck west of x=3240, force east
+            if (!ramping && px < 3240 && pz > 3150 && pz < 3345) {
+                const moved = this.walkToward(px, pz, 3255, Math.max(pz, 3240), 'stuck-east');
+                if (!moved && this.escapeTries > 10) {
+                    this.lastFailure = '';
+                    this.escapeTries = 0;
+                }
+                this.marchWp = -1;
+                this.waitTicks = 2;
+                return;
+            }
+
             // Use waypoint target for escape direction when marching
             const wpIdx = this.marchWp >= 0 && this.marchWp < MARCH_WAYPOINTS.length
                 ? this.marchWp : -1;
@@ -372,7 +386,6 @@ class LawBot {
             if (!ramping && toDist > 5) {
                 const step = 3 + this.escapeTries % 4;
                 const nx = (escTarget.x - px) / toDist, nz = (escTarget.z - pz) / toDist;
-                // Cycle through different wobble angles to probe around obstacles
                 const wobblePhase = this.escapeTries % 7;
                 const wobble = (wobblePhase - 3) * 0.5;
                 dx = Math.round((nx + wobble * nz) * step);
