@@ -642,8 +642,10 @@ class LawBot {
             return;
         }
 
-        // Loot law runes always; coins only when adjacent.
-        const lawPile = state.groundItems.find(g => /law rune/i.test(g.name));
+        // Loot law runes — but NOT at the vault tile, or the bot drops laws
+        // then immediately re-loots them, looping forever (v7.19 bug).
+        const atVault = Math.hypot(px - VAULT.x, pz - VAULT.z) <= 3;
+        const lawPile = atVault ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
         if (lawPile) {
             this.exec({ type: 'pickupItem', x: lawPile.x, z: lawPile.z, itemId: lawPile.id, reason: 'LAW' });
             this.waitTicks = 3;
