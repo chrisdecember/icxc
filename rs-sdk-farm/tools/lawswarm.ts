@@ -80,8 +80,13 @@ const MARCH_WAYPOINTS = [
 // crossing but still sits in this box has NOT crossed — send it back to
 // the gate approach instead of letting it grind north into the fence.
 const BELT = { x0: 3236, x1: 3280, z1: 3304, backTo: 2 };
-// The farm gate itself — march-side handling opens it when it's closed.
-const FARM_GATE = { x0: 3236, x1: 3242, z0: 3294, z1: 3303 };
+// The MAIN farm gate (3239-3240,3301) — march-side handling opens it when
+// closed. Deliberately excludes the pen gate at (3236-3238,3295-3296),
+// which leads into an enclosure, not through the belt.
+const FARM_GATE = { x0: 3238, x1: 3242, z0: 3299, z1: 3303 };
+// Gate corridor: units here are mid-crossing — exempt from BELT regression
+// and from the Lumbridge east-walk escape.
+const inGateCorridor = (x: number, z: number) => x >= 3237 && x <= 3243 && z >= 3296 && z <= 3306;
 
 class LawBot {
     private session: LiteSession | null = null;
@@ -105,6 +110,7 @@ class LawBot {
     private marchWp = -1;
     private marchWpSince = 0;
     private forceCount = 0;
+    private lastGateTick = -99;
 
     laws = 0;
     xpGained = 0;
@@ -390,7 +396,9 @@ class LawBot {
                 console.log(`[${this.name}] STUCK-ESCAPE at (${px},${pz}); locs: ${locs || 'none'}`);
             }
 
-            const inLumbridge = !ramping && px < 3240 && pz > 3150 && pz < 3345;
+            // z cap 3292 keeps this out of the farm-gate corridor (an east
+            // walk at the gate shoves units off the doorway into the fence).
+            const inLumbridge = !ramping && px < 3240 && pz > 3150 && pz < 3292;
 
             // Lumbridge-zone escape: prioritize walking east over opening doors
             // (castle doors lead deeper; east walk escapes the building zone).
@@ -584,7 +592,7 @@ class LawBot {
         if (!target && !ramping && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
             // Lumbridge-escape: bots trapped in buildings/cabbage (west of x=3240,
             // south of z=3260) force-walk east before following waypoints.
-            if (px < 3240 && pz > 3150 && pz < 3345) {
+            if (px < 3240 && pz > 3150 && pz < 3292 && !inGateCorridor(px, pz)) {
                 // Fred's farm / cabbage patch (west of x=3228, north of z=3265)
                 // is fenced on its east side — the only exit is SOUTH along the
                 // sheep pen back to the road junction, then east as normal.
@@ -614,6 +622,7 @@ class LawBot {
             // crossing while still south of the fence means the arrival check
             // lied — go back to the road approach and cross for real.
             if (this.marchWp >= BELT.backTo + 2 && this.marchWp < MARCH_WAYPOINTS.length &&
+                !inGateCorridor(px, pz) &&
                 px >= BELT.x0 && px <= BELT.x1 && pz <= BELT.z1 && pz >= 3285) {
                 this.marchWp = BELT.backTo;
                 this.marchWpSince = this.tick;
@@ -646,8 +655,10 @@ class LawBot {
                     /gate/i.test(l.name) &&
                     l.x >= FARM_GATE.x0 && l.x <= FARM_GATE.x1 &&
                     l.z >= FARM_GATE.z0 && l.z <= FARM_GATE.z1 &&
+                    Math.hypot(l.x - px, l.z - pz) <= 6 &&
                     l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
-                if (gate) {
+                if (gate && this.tick - this.lastGateTick > 25) {
+                    this.lastGateTick = this.tick;
                     const opt = gate.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
                     this.exec({ type: 'interactLoc', x: gate.x, z: gate.z, locId: gate.id, optionIndex: opt.opIndex, reason: 'farm-gate' });
                     console.log(`[${this.name}] FARM-GATE open at (${gate.x},${gate.z})`);
