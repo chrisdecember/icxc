@@ -37,13 +37,37 @@ await runScript(
       return state.player.hp > 0;
     }
 
+    const ARDY_BANK = { x: 2657, z: 3283 };
+
     async function walkWest() {
       console.log("[FINGERS] Marching west to Ardougne");
+      const cur = sdk.getState()?.player;
       for (const p of ROUTE_WEST) {
+        // Never backtrack east after a mid-route restart.
+        if (cur && p.x > cur.worldX + 30) continue;
         await bot.walkTo(p.x, p.z);
         const st = sdk.getState()?.player;
         if (st) console.log(`[FINGERS] waypoint (${st.worldX},${st.worldZ})`);
       }
+    }
+
+    // Coins do NOT survive death on this server (measured: the KING died
+    // holding shopping money and kept only gear). The treasury banks at
+    // Ardougne south — pocket change only on the street.
+    async function bankTreasury(keepPocket = 200) {
+      const coins = sdk.countInventoryItems(/coins/i);
+      if (coins <= keepPocket + 300) return;
+      console.log(`[FINGERS] Banking treasury: ${coins}gp`);
+      await bot.walkTo(ARDY_BANK.x, ARDY_BANK.z);
+      try {
+        await bot.openBank();
+        await bot.depositItem(/coins/i, -1);
+        await bot.closeBank();
+        console.log("[FINGERS] Treasury secured");
+      } catch (e) {
+        console.log(`[FINGERS] Bank failed: ${(e as Error).message}`);
+      }
+      await bot.walkTo(MARKET.x, MARKET.z);
     }
 
     // The baker's stall sits ON the market square (2654,3311) — at
@@ -84,6 +108,7 @@ await runScript(
     );
     await sdk.say("the mint rides west. knights of ardougne await");
     await walkWest();
+    await bankTreasury(); // secure the war chest before the first pick
 
     while (true) {
       if (!(await isAlive())) {
@@ -103,8 +128,9 @@ await runScript(
         if (picks % 50 === 0) {
           const coins = sdk.countInventoryItems(/coins/i);
           console.log(
-            `[FINGERS] KNIGHT-PURSE ${picks} picks, ${coins}gp (+${coins - startCoins} this expedition)`
+            `[FINGERS] KNIGHT-PURSE ${picks} picks, ${coins}gp on hand`
           );
+          await bankTreasury();
         }
       } else {
         await sdk.waitForTicks(3);
