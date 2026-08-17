@@ -25,9 +25,11 @@ await runScript(
       { x: 3050, z: 9585 },
     ];
 
-    const p = () => sdk.getState()?.player;
-    const under = () => (p()?.z ?? 0) > 6000;
-    const posStr = () => { const q = p(); return q ? `(${q.x},${q.z})` : "(?)"; };
+    // player.x/z are 128-per-tile SCENE coords — worldX/worldZ are the real
+    // map coordinates (v2 bug: under() read scene z and misfired in Lumbridge).
+    const p = () => sdk.getState()?.player as any;
+    const under = () => (p()?.worldZ ?? 0) > 6000;
+    const posStr = () => { const q = p(); return q ? `(${q.worldX},${q.worldZ})` : "(?)"; };
 
     const scan = (tag: string) => {
       const s = sdk.getState();
