@@ -31,6 +31,18 @@ Read this before writing a single line of bot code.
 ### Gateway
 - `wss://rs-sdk-demo.fly.dev/gateway` pairs SDK brains with game clients.
 
+### SDK-bot gotchas (learned via gticeprobe)
+- Every bot dir needs a `bot.env` (BOT_USERNAME, PASSWORD, SERVER=
+  rs-sdk-demo.fly.dev, SHOW_CHAT, TELEMETRY) or the lite runner exits
+  ENOENT. New usernames auto-register on first login.
+- `state.player.x/z` are **128-per-tile scene coords** — use
+  `player.worldX/worldZ` for map position. NPC/loc/groundItem coords in
+  state ARE world coords already.
+- `bot.walkTo` fails cleanly across plane boundaries ("Destination is
+  unreachable — may be underground"): descend/ascend first, then walk.
+- A fresh account spawns with 10 HP — anything aggressive kills it in
+  seconds. Probes are disposable but plan hops around aggro clusters.
+
 ### Two ways to run bots
 1. **SDK bot** (`bots/<name>/script.ts` via `sdk/runner`): full high-level
    API — `bot.walkTo` (real pathfinding), `bot.pickupItem`, banking, trading,
@@ -152,11 +164,21 @@ Proven Lumbridge→Varrock road (waypoints, radius): (3245,3235,r10),
   passes CL 26 the wizards stop initiating — passive auto-retaliate
   farming decays and units must attack proactively. Aggro radius ≈14
   tiles (rest spot at anchor+18 east is safe).
-- **Ice warriors**: 7/128 laws (premium tier). REAL location is the
-  Asgarnian Ice Dungeon **underground** at (3044,9581), entered via the
-  ladder south of Port Sarim (~3008,3150). (3008,3471) is Ice Mountain
-  surface — dwarves, wrong. Requires ladder-descent nav that lite
-  clients don't have yet. Gated behind `ICE=1`.
+- **Ice warriors**: 7/128 laws (premium tier). PROBED 2026-08-17 by
+  gticeprobe (SDK bot): **Ladder#1759 at exactly (3008,3150)**, option
+  `Climb-Down`, lands at (3008,9550); return ladder is Ladder#1755.
+  **Warriors confirmed at (3039-3040,9582)**, reachable, Attack option.
+  Hazard gauntlet: 3-4 Muggers (lvl 6) just WEST of the entrance
+  ladder; a **Hobgoblin belt (lvl ~28, aggressive)** at ~(3011-3026,
+  9571-9584) between entrance and chamber — killed the 10-HP probe;
+  ice warriors (lvl 57) always aggro (2x57=114 > any CL). Aggro
+  immunity thresholds: CL 12+ ignores muggers, **CL 56+ ignores
+  hobgoblins**, nothing ignores warriors. Ice-tier units therefore
+  need CL 56+ plus sustain for constant lvl-57 combat — the natural
+  path is lawswarm veterans leveling past 56 at dark wizards, then
+  migrating. The overworld pathfinder CANNOT target underground
+  coords — descend first, then path underground. (3008,3471) is Ice
+  Mountain surface — dwarves, wrong.
 - **Death**: keeps the **3 most-valuable item stacks**, respawn in
   Lumbridge. Therefore: laws ride as the only valuable stack; drop junk
   on sight (`bucket|pot|jug|shears|tinderbox|fishing net|cowhide|raw
