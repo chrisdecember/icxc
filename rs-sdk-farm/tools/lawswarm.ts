@@ -41,7 +41,7 @@ const SITES = [
 // castle walls — bots oscillated at (3208-3220,3207-3231) for 500+ ticks
 // and never arrived. Route south first to bypass the castle.
 const TOWER_WAYPOINTS = [
-    { x: 3218, z: 3195, r: 8 },
+    { x: 3224, z: 3198, r: 10 },
     { x: 3198, z: 3195, r: 10 },
     { x: 3180, z: 3208, r: 10 },
     { x: 3160, z: 3205, r: 10 },
@@ -416,7 +416,7 @@ class LawBot {
         // disconnect — respawn in Lumbridge is a clean reset.
         const atAnchor = Math.hypot(px - this.site.x, pz - this.site.z) < 20 ||
             (this.cl < RAMP_UNTIL && Math.hypot(px - RAMP.x, pz - RAMP.z) < 20);
-        if (atAnchor || this.laws > 0) {
+        if (atAnchor) {
             this.lastProgressTick = this.tick;
         }
         if (this.lastProgressTick === 0) this.lastProgressTick = this.tick;
@@ -994,6 +994,18 @@ class LawBot {
                 this.waitTicks = 2;
                 return;
             }
+            // Tower castle escape: tower bots spawn in the Lumbridge castle
+            // courtyard/interior and can't BFS through walls south to wp0.
+            // Walk east past the gate to the road, then the march takes over.
+            if (towerSite && px >= 3200 && px <= 3228 && pz >= 3208 && pz <= 3225) {
+                if (this.tick % 60 === 0) {
+                    console.log(`[${this.name}] CASTLE-ESCAPE (${px},${pz}) -> east road`);
+                }
+                this.walkToward(px, pz, 3233, 3215, 'castle-escape');
+                this.marchWp = -1;
+                this.waitTicks = 2;
+                return;
+            }
             // Waypoint-based march: follow a tested route east of obstacles.
             if (this.marchWp < 0) {
                 let bestDist = Infinity, bestIdx = 0;
@@ -1038,7 +1050,7 @@ class LawBot {
             if (wpStall > 800) {
                 console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
                 const resetTile = towerSite
-                    ? { x: 3218, z: 3195 }
+                    ? { x: 3224, z: 3198 }
                     : { x: 3245, z: 3235 };
                 this.walkToward(px, pz, resetTile.x, resetTile.z, 'march-reset');
                 this.marchWp = 0;
