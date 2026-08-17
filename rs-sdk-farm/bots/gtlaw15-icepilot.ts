@@ -115,10 +115,23 @@ await runScript(
         continue;
       }
 
-      // No warrior in view: push along the hop chain toward the chamber.
-      const q = p();
-      const next = HOPS.find(h => Math.hypot(h.x - q.worldX, h.z - q.worldZ) > 4) ?? HOPS.at(-1)!;
-      try { await bot.walkTo(next.x, next.z, 3); } catch (_) {}
+      // No warrior in view: push toward the chamber. The SDK pathfinder
+      // has full dungeon collision data and routes on its own — the old
+      // hop chain was a lite-BFS relic and its first hop (3016,9554) is
+      // literally a blocked tile, which wedged the pilot in a retry
+      // loop for half an hour. Try chamber-adjacent targets with wide
+      // radii; back off instead of spamming when none path.
+      let moved = false;
+      for (const t of [{ x: 3040, z: 9582, r: 6 }, { x: 3044, z: 9581, r: 8 }, { x: 3030, z: 9572, r: 8 }]) {
+        try {
+          const r: any = await bot.walkTo(t.x, t.z, t.r);
+          if (r?.success !== false) { moved = true; break; }
+        } catch (_) {}
+      }
+      if (!moved) {
+        console.log(`[ICE] nav stuck at ${pos()} — backing off`);
+        await sdk.waitForTicks(10);
+      }
       await sdk.waitForTicks(2);
     }
   },
