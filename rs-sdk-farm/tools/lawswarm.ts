@@ -190,9 +190,11 @@ class LawBot {
     }
 
     private combatXp(state: BotWorldState): number {
+        // StateCollector publishes the field as `experience` (v7.24: was
+        // reading `.xp`, which doesn't exist — xp telemetry showed 0 all run).
         let xp = 0;
         for (const s of state.skills) {
-            if (/attack|strength|defence|hitpoint/i.test(s.name)) xp += (s as any).xp ?? 0;
+            if (/attack|strength|defence|hitpoint/i.test(s.name)) xp += (s as any).experience ?? 0;
         }
         return xp;
     }
@@ -470,6 +472,20 @@ class LawBot {
                 });
             const opportunistic = nearbyPrey[0];
             if (opportunistic) {
+                // v7.24 aggro-flip fallout: at CL 26+ wizards never initiate,
+                // and from the east rest spot the henge stones block every
+                // melee path — interactNpc just churns cant_reach. A visible
+                // but unreachable target means CLOSE THE DISTANCE first.
+                if (opportunistic.reachable === false && opportunistic.distance > 1) {
+                    const wob = ((this.tick >> 3) % 3) - 1;
+                    this.exec({ type: 'walkTo', x: opportunistic.x + wob, z: opportunistic.z, running: false, reason: 'close-distance' });
+                    if (this.tick % 40 === 0) {
+                        console.log(`[${this.name}] CLOSE-DISTANCE -> ${opportunistic.name}@(${opportunistic.x},${opportunistic.z}) d=${opportunistic.distance}`);
+                    }
+                    this.lastAttackTick = this.tick - ATTACK_RETRY_TICKS + 2;
+                    this.waitTicks = 2;
+                    return;
+                }
                 const savedFailure = this.lastFailure;
                 const opt = opportunistic.optionsWithIndex.find(o => /attack/i.test(o.text))!;
                 this.exec({ type: 'interactNpc', npcIndex: opportunistic.index, optionIndex: opt.opIndex, reason: 'attack' });
@@ -525,6 +541,18 @@ class LawBot {
                 this.lastFailure = '';
                 this.escapeTries = 0;
                 this.marchWp = -1;
+                this.waitTicks = 3;
+                return;
+            }
+
+            // v7.24: near the circle the only gates BFS finds are the sheep-
+            // field gates 10+ tiles north — opening them is pure churn (the
+            // GATE-OPEN spam). Walk back into the henge ring instead; the
+            // wizards stand inside it.
+            if (!ramping && Math.hypot(px - this.site.x, pz - this.site.z) <= 20) {
+                const wx = this.site.x + (this.escapeTries % 5) - 2;
+                const wz = this.site.z + ((this.escapeTries * 3) % 5) - 2;
+                this.exec({ type: 'walkTo', x: wx, z: wz, running: false, reason: 'circle-reset' });
                 this.waitTicks = 3;
                 return;
             }

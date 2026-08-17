@@ -123,9 +123,10 @@ class KickBot {
     }
 
     private combatXp(state: BotWorldState): number {
+        // StateCollector publishes `experience`, not `.xp` (same fix as lawswarm v7.24).
         let xp = 0;
         for (const s of state.skills) {
-            if (/attack|strength|defence|hitpoint/i.test(s.name)) xp += (s as any).xp ?? 0;
+            if (/attack|strength|defence|hitpoint/i.test(s.name)) xp += (s as any).experience ?? 0;
         }
         return xp;
     }
