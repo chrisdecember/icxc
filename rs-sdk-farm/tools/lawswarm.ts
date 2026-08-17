@@ -474,12 +474,13 @@ class LawBot {
             return;
         }
         // Stone-field escape: barb bots trapped among the stones/boulders
-        // at (3175-3187, 3305-3322) can't walk east. Walk north through
-        // the open gate, past the obstacle belt, then resume march.
+        // at (3175-3187, 3305-3322) can't walk east (stones) or north
+        // (gate blocks). Walk SOUTH to clear the obstacle belt, then the
+        // march route picks up from WP5. Don't reset lastProgressTick —
+        // if south also fails, DEEP-STUCK must still fire as a fallback.
         if (barbSite && px < 3188 && pz >= 3305 && pz <= 3322) {
-            if (this.tick % 40 === 0) console.log(`[${this.name}] STONE-ESCAPE at (${px},${pz}) — walking north`);
-            this.walkToward(px, pz, px, 3340, 'stone-escape');
-            this.lastProgressTick = this.tick;
+            if (this.tick % 40 === 0) console.log(`[${this.name}] STONE-ESCAPE at (${px},${pz}) — walking south`);
+            this.walkToward(px, pz, px, 3280, 'stone-escape');
             this.waitTicks = 3;
             return;
         }
