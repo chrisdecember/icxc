@@ -171,7 +171,8 @@ Proven Lumbridge→Varrock road (waypoints, radius): (3245,3235,r10),
   Hazard gauntlet: 3-4 Muggers (lvl 6) just WEST of the entrance
   ladder; a **Hobgoblin belt (lvl ~28, aggressive)** at ~(3011-3026,
   9571-9584) between entrance and chamber — killed the 10-HP probe;
-  ice warriors (lvl 57) always aggro (2x57=114 > any CL). Aggro
+  ice warriors (lvl 57) always aggro (2x57=114 > any CL); Pirates
+  (~lvl 23) roam the NW around (2998,9567). Aggro
   immunity thresholds: CL 12+ ignores muggers, **CL 56+ ignores
   hobgoblins**, nothing ignores warriors. Ice-tier units therefore
   need CL 56+ plus sustain for constant lvl-57 combat — the natural
