@@ -1136,7 +1136,7 @@ class LawBot {
                 const step = Math.min(12, fd);
                 const tx = Math.round(px + ((fx - px) / fd) * step);
                 const tz = Math.round(pz + ((fz - pz) / fd) * step);
-                this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason: 'march-force' });
+                this.walkToward(px, pz, tx, tz, 'march-force');
                 this.lastFailure = '';
                 this.forceCount++;
                 if (this.forceCount % 15 === 1) {
