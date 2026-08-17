@@ -458,43 +458,16 @@ class LawBot {
         // permanently; bots approaching walk east to safety.
         const insideTower = px >= 3104 && px <= 3114 && pz >= 3350 && pz <= 3360;
         if (insideTower) {
-            if (this.tick % 100 === 0) console.log(`[${this.name}] TOWER-TRAPPED at (${px},${pz}) — idling`);
-            this.lastProgressTick = this.tick;
+            if (this.tick % 100 === 0) console.log(`[${this.name}] TOWER-TRAPPED at (${px},${pz}) — awaiting DEEP-STUCK relogin`);
             this.lastFailure = '';
-            this.waitTicks = 60;
+            this.waitTicks = 10;
             return;
         }
         const nearTower = px >= 3090 && px <= 3130 && pz >= 3335 && pz <= 3370;
         if (nearTower) {
             if (this.tick % 20 === 0) console.log(`[${this.name}] TOWER-AVOID at (${px},${pz}) — walking east`);
             this.walkToward(px, pz, px + 30, pz, 'tower-avoid');
-            this.lastProgressTick = this.tick;
             this.waitTicks = 3;
-            return;
-        }
-        // Dead-zone escape: barb bots trapped in the fenced obstacle zone
-        // (x<3220, z=3295-3322) where multi-tile walks are rejected. Try
-        // 1-tile walks east/south to inch out. walkToward's 2-tile min
-        // crosses invisible collision boundaries; 1-tile adjacent walks
-        // may succeed where multi-tile walks don't.
-        if (barbSite && px < 3220 && pz >= 3295 && pz <= 3322) {
-            const dirs = [
-                { x: px + 1, z: pz },     // east
-                { x: px + 1, z: pz - 1 }, // southeast
-                { x: px, z: pz - 1 },     // south
-                { x: px + 1, z: pz + 1 }, // northeast
-                { x: px - 1, z: pz - 1 }, // southwest
-                { x: px, z: pz + 1 },     // north
-            ];
-            for (const d of dirs) {
-                this.exec({ type: 'walkTo', x: d.x, z: d.z, running: false, reason: 'dead-zone-inch' });
-                if (!this.lastFailure) {
-                    this.lastProgressTick = this.tick;
-                    break;
-                }
-            }
-            if (this.tick % 40 === 0) console.log(`[${this.name}] DEAD-ZONE at (${px},${pz}) — 1-tile escape`);
-            this.waitTicks = 2;
             return;
         }
 
