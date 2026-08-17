@@ -135,13 +135,25 @@ await runScript(
         continue;
       }
 
+      // v4: RIDE THE FIGHT TO THE KILL. The 8s attack timeout resolved
+      // mid-fight (lvl-57 kills take 30-60s); the loop re-targeted, the
+      // wounded warrior regenerated, and hours of chip damage produced
+      // ZERO completed kills — hence zero 7/128 drops. Stay engaged with
+      // the same npc until combat drops, eating and emergency-checking
+      // mid-fight.
       const warrior = sdk.findNearbyNpc(/ice warrior/i);
       if (warrior) {
-        try {
-          await bot.attack(warrior, 8000);
-          kills++;
-          if (kills % 5 === 0) console.log(`[ICE] ~${kills} engagements, laws=${laws()}, hp=${p()?.hp}/${p()?.maxHp}, food=${food()}`);
-        } catch (_) {}
+        try { await bot.attack(warrior, 8000); } catch (_) {}
+        const targetIdx = (warrior as any).index;
+        for (let t = 0; t < 40; t++) { // ~96s cap
+          await sdk.waitForTicks(4);
+          const c = (sdk.getState()?.player as any)?.combat;
+          if (!c?.inCombat || (c.targetIndex !== targetIdx && c.targetIndex !== -1)) break;
+          if (hpFrac() < EMERGENCY_FRAC) break; // outer loop handles the escape
+          if (hpFrac() < EAT_FRAC && food() > 0) { try { await bot.eatFood(FOOD); } catch (_) {} }
+        }
+        kills++;
+        if (kills % 5 === 0) console.log(`[ICE] ~${kills} fights ridden, laws=${laws()}, hp=${p()?.hp}/${p()?.maxHp}, food=${food()}`);
         await sdk.waitForTicks(2);
         continue;
       }
