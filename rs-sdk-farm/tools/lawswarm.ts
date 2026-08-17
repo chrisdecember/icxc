@@ -60,7 +60,8 @@ const VAULTS: Record<string, { x: number; z: number }> = {
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
 // or bank — the drop-pile pattern is the collector mechanism.)
 const VAULT = { x: 3228, z: 3340 };
-const VAULT_AT = 8; // laws held before a vault run
+const VAULT_AT = 8; // laws held before a vault run (varrock)
+const VAULT_AT_BARB = 4; // barb village: vault early, minimize death loss
 // Ice-warrior tier (7/128 laws — premium source). REAL location is the
 // Asgarnian Ice Dungeon, UNDERGROUND at (3044,9581) — reached by the
 // ladder south of Port Sarim (surface entrance ~3008,3150). My earlier
@@ -378,6 +379,14 @@ class LawBot {
             this.waitTicks = 1;
             return;
         }
+        if (this.site.name === 'barb-village') {
+            const mageJunk = state.inventory.find(i => /mind rune|air rune/i.test(i.name));
+            if (mageJunk) {
+                this.exec({ type: 'dropItem', slot: mageJunk.slot, reason: 'barb-junk' });
+                this.waitTicks = 1;
+                return;
+            }
+        }
 
         const px = state.player.worldX;
         const pz = state.player.worldZ;
@@ -518,7 +527,8 @@ class LawBot {
         // Vault run: carry the stack to the drop tile; gtvault banks it.
         // Checked BEFORE combat so wizard aggro can't trap a full law stack
         // at the circle indefinitely (v7.21).
-        if (this.laws >= VAULT_AT) {
+        const vaultThresh = barbSite ? VAULT_AT_BARB : VAULT_AT;
+        if (this.laws >= vaultThresh) {
             if (Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) > 2) {
                 this.exec({ type: 'walkTo', x: this.vaultTile.x, z: this.vaultTile.z, running: true, reason: 'vault run' });
                 this.waitTicks = 5;
@@ -607,7 +617,7 @@ class LawBot {
             // MAGE TAG (v7.33): an unengaged target gets a Wind Strike the
             // instant it appears — range beats every walking rival, and
             // the tagged wizard then walks to us for the melee finish.
-            if (opportunistic && !ramping) {
+            if (opportunistic && !ramping && !barbSite) {
                 const minds = state.inventory.filter(i => /mind rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
                 const airs = state.inventory.filter(i => /air rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
                 const alreadyOurs = combat?.inCombat && combat.targetIndex === opportunistic.index;
