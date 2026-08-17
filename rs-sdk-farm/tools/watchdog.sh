@@ -19,12 +19,12 @@ ensure() { # ensure <grep-pattern> <label> <workdir> <cmd...>
 note "watchdog online"
 while true; do
   ensure "lite/lawswarm.ts gtlaw" lawswarm "$RS/server/webclient" \
-    "$BUN" src/lite/lawswarm.ts gtlaw01 gtlaw02 gtlaw04 gtlaw06 gtlaw16 gtlaw03 gtlaw05 gtlaw08 gtlaw09 gtlaw10 gtlaw11 gtlaw12 gtlaw13
+    "$BUN" src/lite/lawswarm.ts gtlaw02 gtlaw06 gtlaw03 gtlaw05 gtlaw08 gtlaw09 gtlaw10 gtlaw11 gtlaw12 gtlaw13
   ensure "lite/mankickers.ts mankicker" mankickers "$RS/server/webclient" \
     "$BUN" src/lite/mankickers.ts mankicker1 mankicker2 mankicker3 mankicker4 mankicker5 mankicker6 mankicker7 mankicker8 mankicker9 mankicker10 mankicker11 mankicker12 mankicker13 mankicker14
   ensure "runner.ts gtvault" gtvault-client "$RS/server/webclient" "$BUN" src/lite/runner.ts gtvault
   ensure "bots/gtvault/script.ts" gtvault "$RS" "$BUN" bots/gtvault/script.ts
-  for u in gtlaw15 gtlaw07 gtlaw14; do
+  for u in gtlaw15 gtlaw07 gtlaw14 gtlaw01 gtlaw04 gtlaw16; do
     ensure "runner.ts $u" "$u-client" "$RS/server/webclient" "$BUN" src/lite/runner.ts "$u"
     ensure "bots/$u/script.ts" "$u" "$RS" "$BUN" "bots/$u/script.ts"
   done

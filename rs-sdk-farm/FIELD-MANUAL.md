@@ -287,11 +287,21 @@ Production is a portfolio, not one site:
 | Runecrafting (Law altar, RC 54, Entrana) | long-term | deferred — needs Rune Mysteries + RC grind |
 | Buying desk (player trades) | gtvault ads | live, no traffic |
 
-**Training pipeline**: fresh accounts ramp on Lumbridge men (cl<10) →
-circle service → promote to ice at CL ~50 (hobgoblin immunity at 56).
-Cohort 2 = gtlaw03/05/08-13. Promotion = copy the generic
-icepilot-script.ts into bots/<name>/ and swap the account from the
-lawswarm roster to an SDK runner+brain pair.
+**Training pipeline (aggro-band doctrine, v7.31 era)**: the circle
+holds BOTH lvl-13 (aggro < 26) and lvl-22 (aggro < 44) dark wizards,
+and rival mage-bots insta-tag passive spawns at range — melee cannot
+win that race. But a wizard already fighting us is UNTAGGABLE, so the
+service window is the aggro band:
+- ramp on Lumbridge men to **CL 27** (immune to lvl-13 gangs)
+- serve the circle **CL 27-43** — lvl-22 wizards attack the unit on
+  sight = free, unstealable engagements; stations + tag-war logic add
+  opportunistic lvl-13 pulls
+- promote to ice at **CL 44** (invisible to all circle aggro from
+  there = wasted at the circle; ladder-anchored pilots rarely meet
+  hobgoblins, so sub-56 promotion is safe in practice)
+Promotion = copy icepilot-script.ts into bots/<name>/, move the
+account from the lawswarm roster to a runner+brain pair, update
+watchdog.sh's roster lines.
 
 **Safety layer**: watchdog.sh relaunches any dead component every
 120s (survives crashes within a container life; the pulse ps-check
