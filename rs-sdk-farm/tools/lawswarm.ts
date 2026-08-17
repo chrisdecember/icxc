@@ -41,14 +41,13 @@ const BARB_WAYPOINTS = [
     { x: 3232, z: 3225, r: 8 },   // east of castle
     { x: 3230, z: 3235, r: 8 },   // north past castle
     { x: 3210, z: 3242, r: 10 },  // northwest to open ground
-    { x: 3192, z: 3258, r: 10 },  // west-northwest
-    { x: 3178, z: 3280, r: 10 },  // northwest
-    { x: 3190, z: 3305, r: 8 },   // north — east of stones/boulders at (3180,3310)
-    { x: 3190, z: 3325, r: 8 },   // north — past stone obstacle
-    { x: 3185, z: 3340, r: 10 },  // north — well east of tower (3109,3354)
-    { x: 3175, z: 3370, r: 10 },  // north — safely east of tower
-    { x: 3150, z: 3395, r: 10 },  // northwest — past tower zone
-    { x: 3100, z: 3410, r: 10 },  // west to village approach
+    { x: 3200, z: 3265, r: 10 },  // north, staying east
+    { x: 3210, z: 3290, r: 10 },  // north on road, east of obstacle zone
+    { x: 3220, z: 3315, r: 8 },   // north — well east of stones (3180,3310)
+    { x: 3210, z: 3340, r: 10 },  // north — east of tower (3109,3354)
+    { x: 3190, z: 3365, r: 10 },  // northwest — past tower zone
+    { x: 3160, z: 3390, r: 10 },  // northwest
+    { x: 3120, z: 3410, r: 10 },  // west to village approach
     { x: 3085, z: 3420, r: 8 },   // barb village
 ];
 // Per-site law sinks. gtvault runs a two-stop patrol: Varrock vault ->
@@ -441,7 +440,7 @@ class LawBot {
         if (stuckDuration > 600) {
             this.deepStuckCount++;
             console.warn(`[${this.name}] DEEP-STUCK ${stuckDuration} ticks at (${px},${pz}) cycle=${this.deepStuckCount} — force relogin`);
-            if (this.deepStuckCount >= 3 && this.cl < RAMP_UNTIL) {
+            if (this.deepStuckCount >= 2 && this.cl < RAMP_UNTIL) {
                 this.cl = RAMP_UNTIL;
                 console.warn(`[${this.name}] force-graduated to CL ${RAMP_UNTIL} after ${this.deepStuckCount} stuck cycles`);
             }
