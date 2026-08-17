@@ -401,12 +401,16 @@ class LawBot {
         // east corner while gtlaw15 alone earned half the swarm xp). The
         // narrow band halves regen wait; wizards max-hit ~2, so 45% of a
         // 35+ hp pool still leaves a deep buffer.
-        // v7.30: tightened again to [40,55) — vets were still visibly
-        // parked at the NE rest spot half the time. Retaliation-only
-        // damage (max-hit ~2) makes a 40% floor of a 36+ pool safe.
+        // v7.34: rest is DE-AGGRO, not heal-to-full. The aggro band keeps
+        // someone at the NE rest spot around the clock if rest waits for
+        // regen (1hp/10s). New exit: chasers gone AND above the gang-valve
+        // floor — a rest cycle is ~20s of shaking the gang, not 5min of
+        // standing. Full-heal exit stays as the fallback.
         if (!ramping && maxHp > 0 && hp > 0) {
+            const hunterNear = state.nearbyNpcs.some(n => /^dark wizard$/i.test(n.name) && n.distance <= 10);
             if (hp < Math.max(4, maxHp * 0.40)) this.recovering = true;
             else if (hp >= maxHp * 0.55) this.recovering = false;
+            else if (this.recovering && !hunterNear && hp >= maxHp * 0.45) this.recovering = false;
         } else {
             this.recovering = false;
         }

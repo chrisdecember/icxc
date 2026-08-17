@@ -21,7 +21,9 @@ await runScript(
 
     const LADDER_DOWN = { x: 3008, z: 3150 };
     const UNDER_LADDER = { x: 3008, z: 9550 };
-    const BAIT_SPOT = { x: 3018, z: 9556 };
+    // (3018,9556) is a blocked tile — probe-proven walkable path is the
+    // (3010-3014, 9550-9552) corridor.
+    const BAIT_SPOT = { x: 3014, z: 9552 };
     const COMBAT_LEASH = 8;
     const DRAYNOR_BANK = { x: 3092, z: 3243 };
     const WYDIN = { x: 3014, z: 3205 };
