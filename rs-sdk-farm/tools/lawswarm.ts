@@ -478,11 +478,16 @@ class LawBot {
                 // and from the east rest spot the henge stones block every
                 // melee path — interactNpc just churns cant_reach. A visible
                 // but unreachable target means CLOSE THE DISTANCE first.
+                // v7.26: walkToward, not walkTo — a direct walk targeted the
+                // wizard's OWN tile (occupied → instant cant_reach every
+                // time), which froze the fleet at the rest pocket while
+                // rival farmers worked the circle. walkToward hops 2-5
+                // tiles and rotates through 9 approach angles until a walk
+                // is actually accepted.
                 if (opportunistic.reachable === false && opportunistic.distance > 1) {
-                    const wob = ((this.tick >> 3) % 3) - 1;
-                    this.exec({ type: 'walkTo', x: opportunistic.x + wob, z: opportunistic.z, running: false, reason: 'close-distance' });
+                    const moved = this.walkToward(px, pz, opportunistic.x, opportunistic.z, 'close-distance');
                     if (this.tick % 40 === 0) {
-                        console.log(`[${this.name}] CLOSE-DISTANCE -> ${opportunistic.name}@(${opportunistic.x},${opportunistic.z}) d=${opportunistic.distance}`);
+                        console.log(`[${this.name}] CLOSE-DISTANCE ${moved ? 'ok' : 'BLOCKED'} -> ${opportunistic.name}@(${opportunistic.x},${opportunistic.z}) d=${opportunistic.distance}`);
                     }
                     this.lastAttackTick = this.tick - ATTACK_RETRY_TICKS + 2;
                     this.waitTicks = 2;
@@ -549,12 +554,16 @@ class LawBot {
 
             // v7.24: near the circle the only gates BFS finds are the sheep-
             // field gates 10+ tiles north — opening them is pure churn (the
-            // GATE-OPEN spam). Walk back into the henge ring instead; the
-            // wizards stand inside it.
+            // GATE-OPEN spam). Walk back toward the wizards instead.
+            // v7.26: use walkToward at the nearest wizard (falling back to
+            // the anchor) — the old direct walkTo aimed at site±2, tiles
+            // that sit inside the stone ring and often reject the walk.
             if (!ramping && Math.hypot(px - this.site.x, pz - this.site.z) <= 20) {
-                const wx = this.site.x + (this.escapeTries % 5) - 2;
-                const wz = this.site.z + ((this.escapeTries * 3) % 5) - 2;
-                this.exec({ type: 'walkTo', x: wx, z: wz, running: false, reason: 'circle-reset' });
+                const wiz = state.nearbyNpcs.filter(n => /^dark wizard$/i.test(n.name))
+                    .sort((a, b) => a.distance - b.distance)[0];
+                const tx = wiz ? wiz.x : this.site.x;
+                const tz = wiz ? wiz.z : this.site.z;
+                this.walkToward(px, pz, tx, tz, 'circle-reset');
                 this.waitTicks = 3;
                 return;
             }
