@@ -344,15 +344,17 @@ class LawBot {
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
 
-        // Recovery mode with hysteresis: enter at <55% hp, exit only at
-        // >=85% — and while recovering, ATTACKS ARE SUPPRESSED (gated below).
-        // Without suppression a chasing wizard re-engages the unit at the
-        // rest spot and "rest" is just dying slightly farther away
-        // (laws=5 flat while deaths climbed to 11). Computed here, BEFORE
-        // the attack block, so a unit mid-fight can actually disengage.
+        // Recovery mode with hysteresis: enter at <45% hp, exit at >=65% —
+        // attacks stay SUPPRESSED while recovering (gated below).
+        // v7.25: was 55/85. Post aggro-flip nothing chases a resting unit,
+        // and natural regen is ~1hp/10s, so the wide band parked the fleet
+        // at the rest spot ~80% of wall-clock (7 of 8 units idle in the
+        // east corner while gtlaw15 alone earned half the swarm xp). The
+        // narrow band halves regen wait; wizards max-hit ~2, so 45% of a
+        // 35+ hp pool still leaves a deep buffer.
         if (!ramping && maxHp > 0 && hp > 0) {
-            if (hp < Math.max(4, maxHp * 0.55)) this.recovering = true;
-            else if (hp >= maxHp * 0.85) this.recovering = false;
+            if (hp < Math.max(4, maxHp * 0.45)) this.recovering = true;
+            else if (hp >= maxHp * 0.65) this.recovering = false;
         } else {
             this.recovering = false;
         }
