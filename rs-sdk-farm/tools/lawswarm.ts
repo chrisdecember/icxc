@@ -66,6 +66,17 @@ const CLAIMS = new Map<number, { by: string; at: number }>();
 // Spawn-camp stations: a ring inside the henge circle. A unit standing
 // beside a spawn tags a fresh wizard at distance 1 — beating every
 // walking rival. Assigned by unit number, spaced around the ring.
+// v7.33 MAGE DOCTRINE: rivals insta-tag with magic; we cast back.
+// Wind Strike (component 1152, Magic 1, 1 mind + 1 air) fired at any
+// UNENGAGED wizard tags it instantly at range — and a tagged wizard
+// walks to US, solving henge reachability for the melee finish. One
+// cast per tag; blades do the killing; runes restock at Aubury.
+const SPELL_WIND_STRIKE = 1152;
+const AUBURY = { x: 3253, z: 3401 };
+const RUNE_MIN = 10;   // below this, shop run
+const RUNE_BUY = 80;   // per-rune-type target after shopping
+const CAST_GAP_TICKS = 5;
+
 const RING_C = { x: 3227, z: 3370 };
 const stationFor = (name: string) => {
     const n = parseInt(name.replace(/\D/g, ''), 10) || 0;
@@ -137,6 +148,7 @@ class LawBot {
     private vaultDropTick = -99;
     private lockIndex = -1;
     private lockSince = 0;
+    private lastCastTick = -99;
     private recovering = false;
 
     laws = 0;
@@ -524,6 +536,26 @@ class LawBot {
             const opportunistic = (lockedNpc && this.lockIndex >= 0 && lockedNpc.reachable !== false ? lockedNpc : undefined)
                 ?? nearbyPrey.find(n => !claimedByPackmate(n))
                 ?? nearbyPrey[0];
+            // MAGE TAG (v7.33): an unengaged target gets a Wind Strike the
+            // instant it appears — range beats every walking rival, and
+            // the tagged wizard then walks to us for the melee finish.
+            if (opportunistic && !ramping) {
+                const minds = state.inventory.filter(i => /mind rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+                const airs = state.inventory.filter(i => /air rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+                const alreadyOurs = combat?.inCombat && combat.targetIndex === opportunistic.index;
+                if (minds >= 1 && airs >= 1 && !alreadyOurs && this.tick - this.lastCastTick >= CAST_GAP_TICKS) {
+                    this.exec({ type: 'spellOnNpc', npcIndex: opportunistic.index, spellComponent: SPELL_WIND_STRIKE, reason: 'MAGE-TAG' });
+                    this.lastCastTick = this.tick;
+                    this.lastAttackTick = this.tick;
+                    if (!this.lastFailure) {
+                        if (this.lockIndex !== opportunistic.index) { this.lockIndex = opportunistic.index; this.lockSince = this.tick; }
+                        CLAIMS.set(opportunistic.index, { by: this.name, at: Date.now() });
+                        if (this.tick % 30 === 0) console.log(`[${this.name}] MAGE-TAG ${opportunistic.name}@d${opportunistic.distance} (minds=${minds} airs=${airs})`);
+                        this.waitTicks = 1;
+                        return;
+                    }
+                }
+            }
             if (opportunistic) {
                 // v7.24 aggro-flip fallout: at CL 26+ wizards never initiate,
                 // and from the east rest spot the henge stones block every
@@ -723,6 +755,45 @@ class LawBot {
                 this.waitTicks = 8;
                 return;
             }
+        }
+
+        // RUNE-UP (v7.33): keep the mage-tag loaded. Below RUNE_MIN of
+        // either rune and holding coin, restock at Aubury's in Varrock.
+        const mindsHeld = state.inventory.filter(i => /mind rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+        const airsHeld = state.inventory.filter(i => /air rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+        const coinsNow = state.inventory.filter(i => /^coins$/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+        const atCircle = Math.hypot(px - anchor.x, pz - anchor.z) < 20;
+        if (!ramping && atCircle !== undefined && (mindsHeld < RUNE_MIN || airsHeld < RUNE_MIN) && coinsNow >= 100 &&
+            (atCircle || Math.hypot(px - AUBURY.x, pz - AUBURY.z) <= 15)) {
+            if (Math.hypot(px - AUBURY.x, pz - AUBURY.z) > 2) {
+                this.walkToward(px, pz, AUBURY.x, AUBURY.z, 'rune-up');
+                this.waitTicks = 4;
+                return;
+            }
+            const shop = (state as any).shop;
+            if (!shop || !shop.items?.length) {
+                const aubury = state.nearbyNpcs.find(n => /aubury/i.test(n.name));
+                const tradeOpt = aubury?.optionsWithIndex.find(o => /trade/i.test(o.text));
+                if (aubury && tradeOpt) {
+                    this.exec({ type: 'interactNpc', npcIndex: aubury.index, optionIndex: tradeOpt.opIndex, reason: 'open runeshop' });
+                }
+                this.waitTicks = 4;
+                return;
+            }
+            for (const want of [/mind rune/i, /air rune/i]) {
+                const held = state.inventory.filter(i => want.test(i.name)).reduce((a, i) => a + i.count, 0);
+                if (held >= RUNE_BUY) continue;
+                const item = shop.items.find((it: any) => want.test(it.name));
+                if (item) {
+                    this.exec({ type: 'shopBuy', slot: item.slot, amount: 30, reason: 'RUNE-UP buy' });
+                    console.log(`[${this.name}] RUNE-UP bought ${item.name} x30 (minds=${mindsHeld} airs=${airsHeld} coins=${coinsNow})`);
+                    this.waitTicks = 2;
+                    return;
+                }
+            }
+            this.exec({ type: 'closeModal', reason: 'runeshop done' });
+            this.waitTicks = 2;
+            return;
         }
 
         // Armament program v7.28: rival farmers run scimitars; an iron
