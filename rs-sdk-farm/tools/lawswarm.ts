@@ -54,9 +54,24 @@ const SWORDSHOP = { x: 3203, z: 3397 };
 // "standing in the corner doing nothing" crowd. Men are safe, solo,
 // and train the same stats; arrive untouchable or don't arrive.
 const RAMP_UNTIL = 27;
-// v7.27: 3-tick gate — the circle is contested by rival farmers; claim
-// speed on fresh wizard spawns decides the kill share.
-const ATTACK_RETRY_TICKS = 3;
+// v7.31 TAG WAR: 1-tick gate. "Someone else is fighting that" means
+// first hit LOCKS the npc — the rival swarm race is won or lost in
+// the pull. Every tick of hesitation is a lost wizard.
+const ATTACK_RETRY_TICKS = 1;
+
+// Shared claims board (all units in this process): don't race
+// packmates for the same wizard — fan out and tag DIFFERENT ones.
+const CLAIMS = new Map<number, { by: string; at: number }>();
+
+// Spawn-camp stations: a ring inside the henge circle. A unit standing
+// beside a spawn tags a fresh wizard at distance 1 — beating every
+// walking rival. Assigned by unit number, spaced around the ring.
+const RING_C = { x: 3227, z: 3370 };
+const stationFor = (name: string) => {
+    const n = parseInt(name.replace(/\D/g, ''), 10) || 0;
+    const ang = (n % 8) * (Math.PI / 4);
+    return { x: Math.round(RING_C.x + Math.cos(ang) * 5), z: Math.round(RING_C.z + Math.sin(ang) * 5) };
+};
 const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
 const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|newcomer|bread/i;
@@ -120,6 +135,8 @@ class LawBot {
     private lastGateTick = -99;
     private lastStyleTick = -99;
     private vaultDropTick = -99;
+    private lockIndex = -1;
+    private lockSince = 0;
     private recovering = false;
 
     laws = 0;
@@ -481,6 +498,21 @@ class LawBot {
                     console.log(`[${this.name}] RAMP-SCAN at (${px},${pz}) prey: ${detail}`);
                 }
             }
+            // Kill-lock: mid-fight with our locked target, let it resolve —
+            // re-clicking or re-targeting throws away a tagged wizard.
+            const lockedNpc = this.lockIndex >= 0
+                ? state.nearbyNpcs.find(n => n.index === this.lockIndex && prey.test(n.name))
+                : undefined;
+            if (!lockedNpc || this.tick - this.lockSince > 60) this.lockIndex = -1;
+            const combat = (state.player as any).combat;
+            if (lockedNpc && this.lockIndex >= 0 && combat?.inCombat && combat.targetIndex === this.lockIndex) {
+                this.waitTicks = 2;
+                return;
+            }
+            const claimedByPackmate = (n: { index: number }) => {
+                const c = CLAIMS.get(n.index);
+                return !!c && c.by !== this.name && Date.now() - c.at < 12_000;
+            };
             const nearbyPrey = state.nearbyNpcs
                 .filter(n => prey.test(n.name))
                 .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
@@ -489,7 +521,9 @@ class LawBot {
                     const br = b.reachable !== false ? 0 : 1;
                     return ar - br || a.distance - b.distance;
                 });
-            const opportunistic = nearbyPrey[0];
+            const opportunistic = (lockedNpc && this.lockIndex >= 0 && lockedNpc.reachable !== false ? lockedNpc : undefined)
+                ?? nearbyPrey.find(n => !claimedByPackmate(n))
+                ?? nearbyPrey[0];
             if (opportunistic) {
                 // v7.24 aggro-flip fallout: at CL 26+ wizards never initiate,
                 // and from the east rest spot the henge stones block every
@@ -515,6 +549,8 @@ class LawBot {
                 this.exec({ type: 'interactNpc', npcIndex: opportunistic.index, optionIndex: opt.opIndex, reason: 'attack' });
                 this.lastAttackTick = this.tick;
                 if (!this.lastFailure) {
+                    if (this.lockIndex !== opportunistic.index) { this.lockIndex = opportunistic.index; this.lockSince = this.tick; }
+                    CLAIMS.set(opportunistic.index, { by: this.name, at: Date.now() });
                     this.escapeTries = 0;
                     return;
                 }
@@ -940,6 +976,19 @@ class LawBot {
             return;
         }
         if (!target) {
+            // TAG-WAR station: nothing to tag means get ON the spawn ring
+            // and wait there — the next wizard pops at distance 1 and we
+            // pull before any walking rival reacts.
+            if (!ramping && Math.hypot(px - this.site.x, pz - this.site.z) <= 20) {
+                const st = stationFor(this.name);
+                if (Math.hypot(px - st.x, pz - st.z) > 2) {
+                    this.walkToward(px, pz, st.x, st.z, 'station');
+                    this.waitTicks = 2;
+                    return;
+                }
+                this.waitTicks = 1;
+                return;
+            }
             if (this.tick % 50 === 0) {
                 const npcs = state.nearbyNpcs.slice(0, 6).map(n => `${n.name}(${n.distance}t)`).join(', ');
                 console.log(`[${this.name}] NO-TARGET at (${px},${pz}) prey=${prey} npcs=[${npcs || 'none'}]`);
