@@ -37,17 +37,19 @@ const SITES = [
     { name: 'wizard-tower', x: 3109, z: 3163 },
 ];
 // Tower route: Lumbridge -> SOUTH to clear castle -> west road -> tower.
-// The old wp0 at (3190,3212) was a straight west walk through Lumbridge
-// castle walls — bots oscillated at (3208-3220,3207-3231) for 500+ ticks
-// and never arrived. Route south first to bypass the castle.
+// BFS-validated route (findLongPath collision data, 194 tiles):
+// east past castle → north to road → west along road → southwest to tower.
+// wp3 forces a westward pass beyond the building cluster at x=3204-3206.
 const TOWER_WAYPOINTS = [
-    { x: 3232, z: 3190, r: 6 },
-    { x: 3210, z: 3192, r: 6 },
-    { x: 3198, z: 3195, r: 10 },
-    { x: 3180, z: 3208, r: 10 },
-    { x: 3160, z: 3205, r: 10 },
-    { x: 3136, z: 3201, r: 10 },
-    { x: 3120, z: 3190, r: 10 },
+    { x: 3232, z: 3222, r: 8 },
+    { x: 3232, z: 3232, r: 8 },
+    { x: 3222, z: 3237, r: 10 },
+    { x: 3197, z: 3233, r: 8 },
+    { x: 3185, z: 3225, r: 8 },
+    { x: 3175, z: 3220, r: 10 },
+    { x: 3155, z: 3217, r: 10 },
+    { x: 3135, z: 3210, r: 10 },
+    { x: 3122, z: 3197, r: 8 },
     { x: 3110, z: 3170, r: 8 },
 ];
 // Per-site law sinks. gtvault runs a two-stop patrol: Varrock vault ->
@@ -995,18 +997,6 @@ class LawBot {
                 this.waitTicks = 2;
                 return;
             }
-            // Tower castle escape: tower bots spawn in the Lumbridge castle
-            // courtyard/interior and can't BFS through walls south to wp0.
-            // Walk east past the gate to the road, then the march takes over.
-            if (towerSite && this.marchWp < 0 && px >= 3200 && px <= 3228 && pz >= 3208 && pz <= 3225) {
-                if (this.tick % 60 === 0) {
-                    console.log(`[${this.name}] CASTLE-ESCAPE (${px},${pz}) -> east road`);
-                }
-                this.walkToward(px, pz, 3233, 3215, 'castle-escape');
-                this.marchWp = -1;
-                this.waitTicks = 2;
-                return;
-            }
             // Waypoint-based march: follow a tested route east of obstacles.
             if (this.marchWp < 0) {
                 let bestDist = Infinity, bestIdx = 0;
@@ -1048,7 +1038,7 @@ class LawBot {
             if (wpStall > 450) {
                 console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
                 const resetTile = towerSite
-                    ? { x: 3232, z: 3190 }
+                    ? { x: 3232, z: 3225 }
                     : { x: 3245, z: 3235 };
                 this.walkToward(px, pz, resetTile.x, resetTile.z, 'march-reset');
                 this.marchWp = 0;
@@ -1117,14 +1107,6 @@ class LawBot {
                     console.log(`[${this.name}] MARCH-ADVANCE (past wp) at (${px},${pz}) -> wp=${this.marchWp}`);
                 }
             }
-            if (towerSite && wpStall > 120 && this.marchWp <= 2 && pz > 3194) {
-                this.walkToward(px, pz, px, 3180, 'tower-south');
-                if (this.tick % 60 === 0) {
-                    console.log(`[${this.name}] TOWER-SOUTH at (${px},${pz}) pz=${pz} -> south to clear buildings`);
-                }
-                this.waitTicks = 2;
-                return;
-            }
             if (wpStall > 240) {
                 const inBelt = px >= BELT.x0 && px <= BELT.x1 && pz >= 3285 && pz <= BELT.z1;
                 const OFFSETS = inBelt
@@ -1149,9 +1131,11 @@ class LawBot {
 
             const wpIdx2 = Math.min(this.marchWp, this.wps.length - 1);
             const curWp = this.marchWp >= this.wps.length ? anchor : this.wps[wpIdx2];
-            const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
-            if (!moved) {
-                this.lastFailure = 'march:cant_reach';
+            if (towerSite) {
+                this.exec({ type: 'walkTo', x: curWp.x, z: curWp.z, running: true, reason: 'march' });
+            } else {
+                const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
+                if (!moved) this.lastFailure = 'march:cant_reach';
             }
             this.waitTicks = 2;
             return;
