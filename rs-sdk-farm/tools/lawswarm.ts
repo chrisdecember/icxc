@@ -290,12 +290,13 @@ class LawBot {
             .filter(i => /law rune/i.test(i.name))
             .reduce((a, i) => a + i.count, 0);
 
-        // Coin discipline: with 2+ laws aboard, a fat coin stack is keep-3
-        // poison — it outvalues a rune and death eats a law instead of gold
-        // (cost gtlaw04 a law). Shed coins while carrying.
+        // Coin discipline v7.28: SAVE for armament (rivals run scim-tier
+        // steel; iron swords lose every kill race). Junk discipline keeps
+        // total stacks at laws+coins+weapon <= 3, so keep-3 protects all
+        // of it — only shed truly fat stacks that outvalue the law pile.
         if (this.laws >= 2) {
             const coins = state.inventory.find(i => /^coins$/i.test(i.name));
-            if (coins) {
+            if (coins && coins.count > 900) {
                 this.exec({ type: 'dropItem', slot: coins.slot, reason: 'coin-shed' });
                 this.waitTicks = 1;
                 return;
@@ -383,21 +384,15 @@ class LawBot {
                     return;
                 }
             } else {
-                // Kick/punch era: shed the weapon, then alternate kick-heavy.
-                const weapon = ((state as any).equipment ?? []).find((e: any) =>
-                    /sword|scimitar|dagger|mace|axe/i.test(e.name));
-                if (weapon) {
-                    this.exec({ type: 'useEquipmentItem', slot: weapon.slot, optionIndex: 1, reason: 'doctrine-fists' });
-                    console.log(`[${this.name}] DOCTRINE unequip ${weapon.name} — fists from here`);
-                    this.waitTicks = 2;
-                    return;
-                }
-                const punchTime = this.tick % 150 < 25;
-                const want = punchTime
-                    ? cs.styles.find((s: any) => /punch/i.test(s.name))
-                    : cs.styles.find((s: any) => /kick/i.test(s.name));
+                // Armament era (v7.28 — supersedes the kick/punch doctrine
+                // for LAW units; kicks stay the mankickers' identity): keep
+                // the blade and fight AGGRESSIVE for max kill speed against
+                // scim-armed rival farmers.
+                const want = cs.styles.find((s: any) => /aggressive/i.test(s.type)) ??
+                    cs.styles.find((s: any) => /slash|chop|kick/i.test(s.name));
                 if (want && cs.currentStyle !== want.index) {
-                    this.exec({ type: 'setCombatStyle', style: want.index, reason: 'doctrine-kickpunch' });
+                    this.exec({ type: 'setCombatStyle', style: want.index, reason: 'doctrine-aggressive' });
+                    console.log(`[${this.name}] DOCTRINE style -> ${want.name} (armament era)`);
                     this.waitTicks = 1;
                     return;
                 }
@@ -667,13 +662,28 @@ class LawBot {
             }
         }
 
-        // Gear program: dark-wizard coins buy an iron sword next door.
-        const hasBetterSword = state.inventory.concat((state as any).equipment ?? [])
-            .some(i => /iron sword|steel sword|scimitar/i.test(i.name));
+        // Armament program v7.28: rival farmers run scimitars; an iron
+        // sword loses every kill race. Tier ladder at the Varrock shop —
+        // black > steel > iron sword — re-shopping whenever savings cover
+        // the next tier. (Scimitars live at Zeke's in Al Kharid behind
+        // the toll gate — future upgrade path once a route is proven.)
+        const GEAR_TIERS = [
+            { re: /black sword/i, cost: 700, tier: 3 },
+            { re: /steel sword/i, cost: 400, tier: 2 },
+            { re: /iron sword/i, cost: 120, tier: 1 },
+        ];
+        const heldTier = (list: any[]) => list.reduce((t, i) => {
+            for (const g of GEAR_TIERS) if (g.re.test(i.name) || /scimitar/i.test(i.name)) t = Math.max(t, /scimitar/i.test(i.name) ? 4 : g.tier);
+            return t;
+        }, 0);
+        const equippedTier = heldTier(((state as any).equipment ?? []));
+        const invTier = heldTier(state.inventory);
+        const myTier = Math.max(equippedTier, invTier);
         const coinsHeld = state.inventory.filter(i => /^coins$/i.test(i.name)).reduce((a, i) => a + i.count, 0);
+        const nextTier = GEAR_TIERS.find(g => g.tier > myTier && coinsHeld >= g.cost);
         const reachedCircle = this.marchWp >= MARCH_WAYPOINTS.length ||
             Math.hypot(px - anchor.x, pz - anchor.z) < 16;
-        if (!ramping && !hasBetterSword && coinsHeld >= 120 && reachedCircle) {
+        if (!ramping && nextTier && reachedCircle) {
             if (Math.hypot(px - SWORDSHOP.x, pz - SWORDSHOP.z) > 3) {
                 this.exec({ type: 'walkTo', x: SWORDSHOP.x, z: SWORDSHOP.z, running: true, reason: 'gear up' });
                 this.waitTicks = 5;
@@ -689,21 +699,37 @@ class LawBot {
                 this.waitTicks = 4;
                 return;
             }
-            const sword = shop.items.find((it: any) => /iron sword/i.test(it.name));
-            if (sword) {
-                this.exec({ type: 'shopBuy', slot: sword.slot, amount: 1, reason: 'buy iron sword' });
-                this.waitTicks = 3;
+            // Buy the best in-stock tier we can afford right now.
+            for (const g of GEAR_TIERS) {
+                if (g.tier <= myTier || coinsHeld < g.cost) continue;
+                const item = shop.items.find((it: any) => g.re.test(it.name));
+                if (item) {
+                    this.exec({ type: 'shopBuy', slot: item.slot, amount: 1, reason: `buy ${item.name}` });
+                    console.log(`[${this.name}] ARMAMENT bought ${item.name} (${coinsHeld} coins held)`);
+                    this.waitTicks = 3;
+                    break;
+                }
             }
             this.exec({ type: 'closeModal', reason: 'done' });
             return;
         }
-        const newSword = state.inventory.find(i => /iron sword|steel sword|scimitar/i.test(i.name));
-        if (newSword) {
-            // Wield option is the weapon's first inventory option.
-            this.exec({ type: 'useInventoryItem', slot: newSword.slot, optionIndex: 1, reason: 'GEAR wield' });
-            console.log(`[${this.name}] GEAR wielding ${newSword.name}`);
-            this.waitTicks = 2;
-            return;
+        // Wield the best sword in the pack; shed outclassed spares (a
+        // fourth stack is keep-3 poison).
+        const invSwords = state.inventory.filter(i => /sword|scimitar/i.test(i.name));
+        if (invSwords.length) {
+            const best = invSwords.sort((a, b) => heldTier([b]) - heldTier([a]))[0];
+            if (heldTier([best]) > equippedTier) {
+                this.exec({ type: 'useInventoryItem', slot: best.slot, optionIndex: 1, reason: 'GEAR wield' });
+                console.log(`[${this.name}] GEAR wielding ${best.name}`);
+                this.waitTicks = 2;
+                return;
+            }
+            const spare = invSwords.find(i => heldTier([i]) <= equippedTier);
+            if (spare) {
+                this.exec({ type: 'dropItem', slot: spare.slot, reason: 'shed-spare-sword' });
+                this.waitTicks = 1;
+                return;
+            }
         }
 
         if (this.recovering) return;
