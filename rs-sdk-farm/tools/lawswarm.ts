@@ -529,8 +529,15 @@ class LawBot {
         // at the circle indefinitely (v7.21).
         const vaultThresh = barbSite ? VAULT_AT_BARB : VAULT_AT;
         if (this.laws >= vaultThresh) {
-            if (Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) > 2) {
-                this.exec({ type: 'walkTo', x: this.vaultTile.x, z: this.vaultTile.z, running: true, reason: 'vault run' });
+            const vdist = Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z);
+            if (vdist > 2) {
+                let tx = this.vaultTile.x, tz = this.vaultTile.z;
+                if (vdist > 50) {
+                    const ratio = 40 / vdist;
+                    tx = Math.round(px + (this.vaultTile.x - px) * ratio);
+                    tz = Math.round(pz + (this.vaultTile.z - pz) * ratio);
+                }
+                this.exec({ type: 'walkTo', x: tx, z: tz, running: true, reason: 'vault run' });
                 this.waitTicks = 5;
                 return;
             }
@@ -539,6 +546,7 @@ class LawBot {
                 this.exec({ type: 'dropItem', slot, reason: 'VAULT-DROP' });
                 console.log(`[${this.name}] VAULT-DROP ${this.laws} laws`);
                 this.vaultDropTick = this.tick;
+                if (barbSite) this.marchWp = -1;
                 this.waitTicks = 3;
                 return;
             }
