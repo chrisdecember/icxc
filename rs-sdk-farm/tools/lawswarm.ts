@@ -1160,7 +1160,8 @@ class LawBot {
                     const d = Math.hypot(px - this.wps[i].x, pz - this.wps[i].z);
                     if (d < bestDist) { bestDist = d; bestIdx = i; }
                 }
-                this.marchWp = bestDist < 12 ? Math.min(bestIdx + 1, this.wps.length) : bestIdx;
+                const wpR = (this.wps[bestIdx] as any).r ?? 10;
+                this.marchWp = bestDist < wpR ? Math.min(bestIdx + 1, this.wps.length) : bestIdx;
                 this.marchWpSince = this.tick;
             }
             // Crossing regression guard: claiming to be past the farm-belt
