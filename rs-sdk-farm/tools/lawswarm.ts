@@ -169,6 +169,8 @@ class LawBot {
     private lockIndex = -1;
     private lockSince = 0;
     private lastCastTick = -99;
+    lastTickMs = 0;
+    connectMs = 0;
 
     private get wps() { return this.site.name === 'wizard-tower' ? TOWER_WAYPOINTS : MARCH_WAYPOINTS; }
     private get vaultTile() { return VAULTS[this.site.name] ?? VAULT; }
@@ -204,8 +206,11 @@ class LawBot {
         this.seenHp = false;
         this.lastAttackTick = -99;
         this.busy = false;
+        this.lastTickMs = Date.now();
+        this.connectMs = Date.now();
         this.client.setOnGameTickCallback(() => {
             this.tick++;
+            this.lastTickMs = Date.now();
             this.onTick().catch(e => console.error(`[${this.name}] tick error:`, e));
         });
     }
@@ -637,7 +642,8 @@ class LawBot {
 
             // z cap 3292 keeps this out of the farm-gate corridor (an east
             // walk at the gate shoves units off the doorway into the fence).
-            const inLumbridge = !ramping && px < 3240 && pz > 3150 && pz < 3292;
+            // Tower bots march west — don't push them east.
+            const inLumbridge = !ramping && !towerSite && px < 3240 && pz > 3150 && pz < 3292;
 
             // Lumbridge-zone escape: prioritize walking east over opening doors
             // (castle doors lead deeper; east walk escapes the building zone).
@@ -654,6 +660,19 @@ class LawBot {
                     this.waitTicks = 2;
                     return;
                 }
+            }
+
+            // Sword-shop trap: bots buy gear and get stuck inside.
+            // The exit door is south-east; use walkToward to angle-probe.
+            const inShopBldg = px >= 3198 && px <= 3210 && pz >= 3393 && pz <= 3403;
+            if (inShopBldg) {
+                const moved = this.walkToward(px, pz, 3215, 3393, 'shop-escape');
+                if (!moved) this.walkToward(px, pz, 3195, pz, 'shop-escape-west');
+                this.lastFailure = '';
+                this.escapeTries = 0;
+                this.waitTicks = 4;
+                console.log(`[${this.name}] SHOP-ESCAPE at (${px},${pz}) moved=${moved}`);
+                return;
             }
 
             const atTollGate = px >= 3264 && px <= 3272 && pz >= 3224 && pz <= 3232;
@@ -874,6 +893,17 @@ class LawBot {
                 }
             }
             this.exec({ type: 'closeModal', reason: 'done' });
+            this.waitTicks = 3;
+            return;
+        }
+        // Exit the sword shop building: the door closes behind us and the
+        // stuck-escape code targets a far-off gate instead of the doorway.
+        const inSwordShop = Math.hypot(px - SWORDSHOP.x, pz - SWORDSHOP.z) <= 5 &&
+            Math.hypot(px - this.site.x, pz - this.site.z) > 10;
+        if (inSwordShop && !ramping) {
+            this.exec({ type: 'walkTo', x: SWORDSHOP.x + 10, z: SWORDSHOP.z, running: true, reason: 'exit-shop' });
+            this.lastFailure = '';
+            this.waitTicks = 4;
             return;
         }
         // Wield the best sword in the pack; shed outclassed spares (a
@@ -917,7 +947,8 @@ class LawBot {
         if (!target && !ramping && Math.hypot(px - anchor.x, pz - anchor.z) > 14) {
             // Lumbridge-escape: bots trapped in buildings/cabbage (west of x=3240,
             // south of z=3260) force-walk east before following waypoints.
-            if (px < 3240 && pz > 3150 && pz < 3292 && !inGateCorridor(px, pz)) {
+            // Tower-bound bots march WEST — don't push them east.
+            if (!towerSite && px < 3240 && pz > 3150 && pz < 3292 && !inGateCorridor(px, pz)) {
                 // Fred's farm / cabbage patch (west of x=3228, north of z=3265)
                 // is fenced on its east side — the only exit is SOUTH along the
                 // sheep pen back to the road junction, then east as normal.
@@ -975,6 +1006,21 @@ class LawBot {
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
             if (this.tick % 60 === 0) {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${this.wps.length} stall=${wpStall}`);
+            }
+
+            // Hard reset: 800+ ticks stuck on the same waypoint means the
+            // local geometry has beaten every probe. Walk to a known-good
+            // open-ground tile and restart the march from there.
+            if (wpStall > 800) {
+                console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
+                const resetTile = towerSite
+                    ? { x: 3190, z: 3220 }
+                    : { x: 3245, z: 3235 };
+                this.walkToward(px, pz, resetTile.x, resetTile.z, 'march-reset');
+                this.marchWp = 0;
+                this.marchWpSince = this.tick;
+                this.waitTicks = 4;
+                return;
             }
 
             // Gate-aim: near the gate WP (inside the cattle pen or on the
@@ -1147,12 +1193,14 @@ async function login(bot: LawBot): Promise<void> {
 
 function onSessionEnd(bot: LawBot, end: SessionEnd): void {
     if (shuttingDown || end.reason === 'stopped') return;
-    console.warn(`[lawswarm] ${bot.name} lost session (${end.reason}) - re-login`);
-    void relogin(bot);
+    const uptime = bot.connectMs > 0 ? Math.round((Date.now() - bot.connectMs) / 1000) : 0;
+    console.warn(`[lawswarm] ${bot.name} lost session (${end.reason}) uptime=${uptime}s - re-login`);
+    const crashLoop = uptime < 30;
+    void relogin(bot, crashLoop ? 30_000 : RELOGIN_MS);
 }
 
-async function relogin(bot: LawBot): Promise<void> {
-    let delay = RELOGIN_MS;
+async function relogin(bot: LawBot, initialDelay = RELOGIN_MS): Promise<void> {
+    let delay = initialDelay;
     while (!shuttingDown) {
         await Bun.sleep(delay);
         if (shuttingDown) return;
@@ -1160,7 +1208,8 @@ async function relogin(bot: LawBot): Promise<void> {
             await login(bot);
             bot.relogins++;
             return;
-        } catch {
+        } catch (e) {
+            console.warn(`[lawswarm] ${bot.name} relogin failed (delay=${Math.round(delay / 1000)}s): ${(e as Error).message}`);
             delay = Math.min(delay * 2, RELOGIN_MAX_MS);
         }
     }
@@ -1201,7 +1250,31 @@ const report = setInterval(() => {
             bot.resetRoute();
         }
     }
+    const ZOMBIE_MS = 180_000;
+    const now = Date.now();
+    for (const bot of bots) {
+        if (bot.online && bot.lastTickMs > 0 && now - bot.lastTickMs > ZOMBIE_MS) {
+            console.warn(`[lawswarm] ${bot.name} ZOMBIE (no tick for ${Math.round((now - bot.lastTickMs) / 1000)}s) — force relogin`);
+            bot.forceDisconnect();
+            void relogin(bot);
+        }
+    }
 }, 120_000);
+
+process.on('SIGTERM', () => {
+    console.log('[lawswarm] SIGTERM — clean shutdown');
+    shuttingDown = true;
+    clearInterval(report);
+    for (const b of bots) b.stop();
+    process.exit(0);
+});
+process.on('SIGINT', () => {
+    console.log('[lawswarm] SIGINT — clean shutdown');
+    shuttingDown = true;
+    clearInterval(report);
+    for (const b of bots) b.stop();
+    process.exit(0);
+});
 
 if (minutes > 0) {
     setTimeout(() => {

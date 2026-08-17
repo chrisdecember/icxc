@@ -267,6 +267,12 @@ bank runs, zero deaths at the current vault position.
 | ice v5 | ladder leash parked squad outside warrior aggro radius → idle logout | anchored at chamber (3040,9578) where the warriors actually are |
 | ops | game login server offline → all clients disconnect | server-monitor.sh checks every 30s, triggers fleet restart on recovery |
 | ops | pkill in watchdog kills runner clients, they crash on LoginError code 8 | runners crash-loop is expected during server outage; watchdog restarts |
+| v7.35 | bots trapped inside sword shop building (3198-3210, 3393-3403) after buying gear — door closed behind them | dedicated SHOP-ESCAPE: walkToward angle probing toward SE exit + west fallback when inside shop bounds |
+| v7.35 | tower-bound bots caught by Lumbridge east-walk escape code, pushed east instead of marching west to tower | added `!towerSite` guard to both Lumbridge-escape triggers |
+| v7.35 | wheat-field stall: bot stuck 1000+ ticks at (3209-3219, 3334-3354) among fern/wheat objects, march-force couldn't escape because slight movement reset stale detector | MARCH-RESET: 800+ tick wpStall triggers walk to known-good open ground and full march restart |
+| ops | zombie sessions: bot online in state but receiving no game ticks (TCP half-open, server stale) | zombie reaper every 120s: no tick for 180s → forceDisconnect + relogin |
+| ops | crash-loop: bot disconnects within 30s of connect, hammers server with rapid relogins | crash-loop detection: uptime < 30s → 30s initial backoff instead of default 5s |
+| ops | 6h game server login outage (05:00-11:56 UTC 2026-08-17) killed all sessions | server-monitor.sh + watchdog.sh + relogin backoff + send_later check-ins auto-recovered; SIGTERM handler for clean shutdown |
 
 ## 10. Telemetry & ops patterns that worked
 
@@ -329,6 +335,9 @@ this races the rivals for first tag.
 - server-monitor.sh tests login every 30s; kills fleet for clean
   restart on recovery
 - lawswarm relogin: exponential backoff 5s→60s on disconnect
+- crash-loop detection: uptime < 30s → 30s initial backoff
+- zombie reaper: 120s check, force-relogin bots with no tick for 180s
+- SIGTERM/SIGINT clean shutdown handlers (stop all bots, clear timers)
 - ice pilot three-layer sustain: food / retreat@45% / emergency@25%
   with ladder escape retry loop
 - pulse check-ins (13-min cadence) as the cross-restart safety net
