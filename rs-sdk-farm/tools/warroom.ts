@@ -29,7 +29,7 @@ const drops: { at: number; n: number; who: string }[] = [];
 let bots: BotRow[] = []; let cur: BotRow[] = [];
 let deaths = 0; let online = "?/?";
 for (const ln of law) {
-  if (ln.includes("deploying 8 law-farm")) { deployCount++; lastDeployAt = lawsSeries.length; }
+  if (/deploying \d+ law-farm/.test(ln)) { deployCount++; lastDeployAt = lawsSeries.length; }
   const m = ln.match(/LAWSWARM laws=(\d+) deaths=(\d+) online=(\S+).*xp=(\d+)/);
   if (m) {
     lawsSeries.push(+m[1]); xpSeries.push(+m[4]); deaths = +m[2]; online = m[3];
@@ -71,6 +71,19 @@ for (const s of kickSeries) { if (s.k < prevK) { lifetimeKicks += prevK; lifetim
 lifetimeKicks += Math.max(0, prevK);
 const nowKP = kickSeries.at(-1) ?? { k: 0, p: 0 };
 
+// ---- ice pilot (gtlaw15 SDK brain): laws carried + Draynor bank runs
+const ice = read("gtlaw15.log").split("\n");
+let iceLaws = 0, iceBanks = 0, iceRetreats = 0, iceStatus = "offline";
+for (const ln of ice) {
+  const l = ln.match(/laws=(\d+)/); if (l) iceLaws = +l[1];
+  const lt = ln.match(/LOOT laws -> (\d+)/); if (lt) iceLaws = +lt[1];
+  if (ln.includes("[ICE] BANKED at Draynor")) { iceBanks++; iceLaws = 0; }
+  if (ln.includes("[ICE] RETREAT")) iceRetreats++;
+  if (ln.includes("[ICE] pilot online")) iceStatus = "marching";
+  if (ln.includes("[ICE] descended")) iceStatus = "underground";
+  if (ln.includes("[ICE] BANK-RUN")) iceStatus = "banking";
+}
+
 // ---- derived metrics
 const W = Math.min(30, lawsSeries.length - 1); // ~last hour of reports
 const swarmNow = lawsSeries.at(-1) ?? 0;
@@ -84,7 +97,7 @@ const xpThen = xpSeries.at(-1 - xpWindow) ?? 0;
 const xpPerHr = xpWindow > 0 ? Math.round((xpNow - xpThen) * (3600 / (xpWindow * REPORT_SEC))) : 0;
 const k2 = kickSeries.at(-1)?.k ?? 0, k1 = kickSeries.at(-3)?.k ?? k2;
 const kicksPerMin = Math.max(0, Math.round((k2 - k1) / (2 * REPORT_SEC / 60) * 10) / 10);
-const totalControlled = swarmNow + holding + banked;
+const totalControlled = swarmNow + holding + banked + iceLaws;
 const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
 // ---- svg helpers
@@ -250,6 +263,8 @@ font-size:.66rem;padding:.25rem .5rem;border-radius:3px;display:none;font-varian
   <div class="panel"><h2>Pipeline events</h2>
     <ul class="feed">${feed || "<li>quiet</li>"}</ul>
     <div class="u-ft" style="margin-top:.5rem">gtvault holding ${holding} · banks at 10 · ${bankRuns.length} runs total</div>
+    <h2 style="margin-top:.8rem">Ice tier — gtlaw15 pilot (7/128 drops)</h2>
+    <div class="u-ft">status: ${iceStatus} · carrying ${iceLaws} laws · ${iceBanks} Draynor bank runs · ${iceRetreats} ladder retreats</div>
   </div>
 </div>
 <div class="tip" id="tip"></div>
