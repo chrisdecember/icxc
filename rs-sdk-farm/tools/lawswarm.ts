@@ -41,8 +41,8 @@ const SITES = [
 // castle walls — bots oscillated at (3208-3220,3207-3231) for 500+ ticks
 // and never arrived. Route south first to bypass the castle.
 const TOWER_WAYPOINTS = [
-    { x: 3224, z: 3198, r: 8 },
-    { x: 3210, z: 3196, r: 8 },
+    { x: 3232, z: 3190, r: 6 },
+    { x: 3210, z: 3192, r: 6 },
     { x: 3198, z: 3195, r: 10 },
     { x: 3180, z: 3208, r: 10 },
     { x: 3160, z: 3205, r: 10 },
@@ -1048,7 +1048,7 @@ class LawBot {
             if (wpStall > 450) {
                 console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
                 const resetTile = towerSite
-                    ? { x: 3224, z: 3198 }
+                    ? { x: 3232, z: 3190 }
                     : { x: 3245, z: 3235 };
                 this.walkToward(px, pz, resetTile.x, resetTile.z, 'march-reset');
                 this.marchWp = 0;
@@ -1117,12 +1117,15 @@ class LawBot {
                     console.log(`[${this.name}] MARCH-ADVANCE (past wp) at (${px},${pz}) -> wp=${this.marchWp}`);
                 }
             }
+            if (towerSite && wpStall > 120 && this.marchWp <= 2 && pz > 3194) {
+                this.walkToward(px, pz, px, 3180, 'tower-south');
+                if (this.tick % 60 === 0) {
+                    console.log(`[${this.name}] TOWER-SOUTH at (${px},${pz}) pz=${pz} -> south to clear buildings`);
+                }
+                this.waitTicks = 2;
+                return;
+            }
             if (wpStall > 240) {
-                // Force-toward-WP: offset the target around the waypoint's
-                // bearing instead of shoving blind east (blind east is what
-                // built the dead pocket at x=3262-3265). Inside the farm belt
-                // probe WEST first — the road crossing is west, east is the
-                // pocket. Elsewhere cycle W/direct/N.
                 const inBelt = px >= BELT.x0 && px <= BELT.x1 && pz >= 3285 && pz <= BELT.z1;
                 const OFFSETS = inBelt
                     ? [{ dx: -10, dz: -2 }, { dx: -14, dz: 4 }, { dx: -6, dz: 8 }]
@@ -1134,8 +1137,7 @@ class LawBot {
                 const step = Math.min(12, fd);
                 const tx = Math.round(px + ((fx - px) / fd) * step);
                 const tz = Math.round(pz + ((fz - pz) / fd) * step);
-                const forced = this.walkToward(px, pz, tx, tz, 'march-force');
-                if (forced) this.lastProgressTick = this.tick;
+                this.walkToward(px, pz, tx, tz, 'march-force');
                 this.lastFailure = '';
                 this.forceCount++;
                 if (this.forceCount % 15 === 1) {
