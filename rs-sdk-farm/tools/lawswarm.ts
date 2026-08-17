@@ -44,11 +44,11 @@ const BARB_WAYPOINTS = [
     { x: 3192, z: 3258, r: 10 },  // west-northwest
     { x: 3178, z: 3280, r: 10 },  // northwest
     { x: 3163, z: 3305, r: 10 },  // north
-    { x: 3148, z: 3335, r: 10 },  // north
-    { x: 3130, z: 3365, r: 10 },  // north-northwest
-    { x: 3118, z: 3385, r: 10 },  // north
-    { x: 3100, z: 3395, r: 10 },  // west
-    { x: 3085, z: 3412, r: 8 },   // south approach to village
+    { x: 3155, z: 3340, r: 10 },  // north — stay east of wizard tower
+    { x: 3145, z: 3370, r: 10 },  // north — east of tower (3109,3354)
+    { x: 3125, z: 3395, r: 10 },  // north — safely past tower
+    { x: 3100, z: 3410, r: 10 },  // west to village approach
+    { x: 3085, z: 3420, r: 8 },   // barb village
 ];
 // Per-site law sinks. gtvault runs a two-stop patrol: Varrock vault ->
 // Varrock West bank, tower vault -> Draynor bank (right next door).
@@ -554,7 +554,7 @@ class LawBot {
 
         // Loot law runes BEFORE attack/escape — the stuck-escape loop can
         // starve the loot code if it sits below (v7.23: was after gear).
-        const nearVault = Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) <= 8;
+        const nearVault = Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) <= 20;
         const vaultCooldown = this.tick - this.vaultDropTick < 15;
         if (this.tick % 100 === 0 && state.groundItems.length > 0) {
             const nearby = state.groundItems.slice(0, 8).map(g => `${g.name}(${g.x},${g.z})`).join(', ');
