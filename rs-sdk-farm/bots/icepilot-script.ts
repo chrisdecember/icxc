@@ -21,17 +21,21 @@ await runScript(
 
     const LADDER_DOWN = { x: 3008, z: 3150 };
     const UNDER_LADDER = { x: 3008, z: 9550 };
-    // (3018,9556) is a blocked tile — probe-proven walkable path is the
-    // (3010-3014, 9550-9552) corridor.
-    const BAIT_SPOT = { x: 3014, z: 9552 };
-    const COMBAT_LEASH = 8;
+    // v5: fight AT THE CHAMBER. The ladder leash parked the squad
+    // outside warrior aggro radius (~10-14t; chamber is 25+t east) —
+    // five pilots idled at full hp until the server's 5-min idle
+    // logout cycled them (the watchdog churn). Ladder = emergency
+    // exit, not home. Deaths are cheap: keep-3 saves the laws and SDK
+    // pathfinding marches back automatically.
+    const CHAMBER = { x: 3040, z: 9578 };
+    const COMBAT_LEASH = 12;
     const DRAYNOR_BANK = { x: 3092, z: 3243 };
     const WYDIN = { x: 3014, z: 3205 };
     const BANK_AT = 12;
     const EAT_FRAC = 0.7;
-    const RETREAT_FRAC = 0.5;
-    const EMERGENCY_FRAC = 0.3;
-    const RESUME_FRAC = 0.8;
+    const RETREAT_FRAC = 0.45;
+    const EMERGENCY_FRAC = 0.25;
+    const RESUME_FRAC = 0.7;
     const FOOD_BUY = 16;
     const FOOD = /banana|bread|cake|meat|anchovies|shrimp/i;
 
@@ -56,7 +60,7 @@ await runScript(
       return !under();
     }
 
-    console.log(`[ICE] pilot v3 online at ${pos()} laws=${laws()} food=${food()}`);
+    console.log(`[ICE] pilot v5 online at ${pos()} laws=${laws()} food=${food()}`);
 
     while (true) {
       const st = sdk.getState();
@@ -130,9 +134,11 @@ await runScript(
         continue;
       }
 
-      // Layer 1: leash — fall back to the anchor before fighting farther out.
-      if (distLadder() > COMBAT_LEASH) {
-        try { await bot.walkTo(UNDER_LADDER.x + 2, UNDER_LADDER.z + 1, 2); } catch (_) {}
+      // Layer 1: hold the CHAMBER — that's where the aggro radius is.
+      const q0 = p();
+      const distChamber = q0 ? Math.hypot(q0.worldX - CHAMBER.x, q0.worldZ - CHAMBER.z) : 99;
+      if (distChamber > COMBAT_LEASH) {
+        try { await bot.walkTo(CHAMBER.x, CHAMBER.z, 6); } catch (_) {}
         await sdk.waitForTicks(2);
         continue;
       }
@@ -160,11 +166,11 @@ await runScript(
         continue;
       }
 
-      // No warrior in view: bait east briefly, then return to the anchor.
-      try { await bot.walkTo(BAIT_SPOT.x, BAIT_SPOT.z, 3); } catch (_) {}
-      await sdk.waitForTicks(6);
-      try { await bot.walkTo(UNDER_LADDER.x + 2, UNDER_LADDER.z + 1, 2); } catch (_) {}
-      await sdk.waitForTicks(2);
+      // No warrior in view at the chamber (rare): wiggle to reset the
+      // idle-logout timer and rescan.
+      const qw = p();
+      if (qw) { try { await bot.walkTo(qw.worldX + ((Date.now() >> 10) % 2 ? 2 : -2), qw.worldZ + 1, 1); } catch (_) {} }
+      await sdk.waitForTicks(8);
     }
   },
   { timeout: 86_400_000 }
