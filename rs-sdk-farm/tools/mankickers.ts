@@ -427,13 +427,15 @@ const bots: KickBot[] = names.map((n, i) => new KickBot(n, ROUTES[i % ROUTES.len
 
 async function login(bot: KickBot): Promise<void> {
     const env = await readEnv(bot.name);
-    const session = await startSession({
+    const sessionP = startSession({
         host: env.SERVER || 'localhost',
         username: env.BOT_USERNAME!,
         password: env.PASSWORD!,
         quiet: true,
         onEnd: (end: SessionEnd) => onSessionEnd(bot, end),
     });
+    const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('login timeout (20s)')), 20_000));
+    const session = await Promise.race([sessionP, timeout]);
     bot.attach(session);
 }
 
