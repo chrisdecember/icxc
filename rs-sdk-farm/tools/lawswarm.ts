@@ -3,8 +3,8 @@
 //   cd server/webclient
 //   bun src/lite/lawswarm.ts gtlaw01 gtlaw02 ... [--minutes=N]
 //
-// Dark wizards drop 3x law runes at 1/128 and stand in two circles we can
-// reach: south of Varrock (3225,3374) and the Lumbridge zone (3220,3220).
+// Dark wizards drop 3x law runes at 1/128 — two sites:
+// south of Varrock (3225,3374) and Barbarian Village (3082,3420).
 // Each bot ramps on Lumbridge men until its melee holds, then works its assigned
 // circle: attack, loot law runes (and adjacent coins), rest when low.
 // Per-bot XP-rate telemetry reveals spawn saturation per site — the data
@@ -28,35 +28,34 @@ import type { LiteClient } from './LiteClient.js';
 const RAMP = { x: 3222, z: 3222 };
 // Lumbridge-zone removed: no dark wizards spawn there (only men/rats).
 // All graduated units converge on the Varrock circle.
-// v7.35 second front: the Wizards' Tower (probe-verified 2026-08-17):
-// 4 lvl-9 wizard spawns, law droppers, ZERO rival farmers, and lvl-9
-// aggro (<18) barely touches anyone. Fast kills beat slow drop tables —
-// laws/hr is kill-count-bound. Units alternate sites by roster index.
+// v7.36 second front: Barbarian Village dark wizards. Beefy (high lvl)
+// but they drop 3x law runes at 1/128 — same as varrock circle. Zero
+// rival farmers there. Units alternate sites by roster index.
 const SITES = [
     { name: 'varrock-circle', x: 3225, z: 3374 },
-    { name: 'wizard-tower', x: 3109, z: 3163 },
+    { name: 'barb-village', x: 3082, z: 3420 },
 ];
-// Tower route: Lumbridge -> SOUTH to clear castle -> west road -> tower.
-// BFS-validated route (findLongPath collision data, 194 tiles):
-// east past castle → north to road → west along road → southwest to tower.
-// wp3 forces a westward pass beyond the building cluster at x=3204-3206.
-const TOWER_WAYPOINTS = [
-    { x: 3232, z: 3222, r: 8 },
-    { x: 3232, z: 3232, r: 8 },
-    { x: 3222, z: 3237, r: 10 },
-    { x: 3197, z: 3233, r: 8 },
-    { x: 3185, z: 3225, r: 8 },
-    { x: 3175, z: 3220, r: 10 },
-    { x: 3155, z: 3217, r: 10 },
-    { x: 3135, z: 3210, r: 10 },
-    { x: 3122, z: 3197, r: 8 },
-    { x: 3110, z: 3170, r: 8 },
+// Barb Village route: Lumbridge → west past castle → northwest through
+// open terrain → north to Barbarian Village. BFS-validated (98 tiles).
+// Uses direct walkTo (game BFS) like the old tower march.
+const BARB_WAYPOINTS = [
+    { x: 3232, z: 3225, r: 8 },   // east of castle
+    { x: 3230, z: 3235, r: 8 },   // north past castle
+    { x: 3210, z: 3242, r: 10 },  // northwest to open ground
+    { x: 3192, z: 3258, r: 10 },  // west-northwest
+    { x: 3178, z: 3280, r: 10 },  // northwest
+    { x: 3163, z: 3305, r: 10 },  // north
+    { x: 3148, z: 3335, r: 10 },  // north
+    { x: 3130, z: 3365, r: 10 },  // north-northwest
+    { x: 3118, z: 3385, r: 10 },  // north
+    { x: 3100, z: 3395, r: 10 },  // west
+    { x: 3085, z: 3412, r: 8 },   // south approach to village
 ];
 // Per-site law sinks. gtvault runs a two-stop patrol: Varrock vault ->
 // Varrock West bank, tower vault -> Draynor bank (right next door).
 const VAULTS: Record<string, { x: number; z: number }> = {
     'varrock-circle': { x: 3228, z: 3340 },
-    'wizard-tower': { x: 3105, z: 3158 },
+    'barb-village': { x: 3090, z: 3410 },
 };
 // All laws flow through the vault: units drop their stacks here and the
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
@@ -180,7 +179,7 @@ class LawBot {
     lastTickMs = 0;
     connectMs = 0;
 
-    private get wps() { return this.site.name === 'wizard-tower' ? TOWER_WAYPOINTS : MARCH_WAYPOINTS; }
+    private get wps() { return this.site.name === 'barb-village' ? BARB_WAYPOINTS : MARCH_WAYPOINTS; }
     private get vaultTile() { return VAULTS[this.site.name] ?? VAULT; }
     private recovering = false;
 
@@ -433,6 +432,7 @@ class LawBot {
 
         const ramping = this.cl < RAMP_UNTIL;
         const iceTier = ICE_ENABLED && this.cl >= 45;
+        const barbSite = this.site.name === 'barb-village';
         const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
 
         // v7.30 ramp-return: a ramping unit far from the training field
@@ -462,9 +462,13 @@ class LawBot {
         // standing. Full-heal exit stays as the fallback.
         if (!ramping && maxHp > 0 && hp > 0) {
             const hunterNear = state.nearbyNpcs.some(n => /^dark wizard$/i.test(n.name) && n.distance <= 10);
-            if (hp < Math.max(4, maxHp * 0.40)) this.recovering = true;
-            else if (hp >= maxHp * 0.55) this.recovering = false;
-            else if (this.recovering && !hunterNear && hp >= maxHp * 0.45) this.recovering = false;
+            // Barb-village dark wizards are beefy — wider recovery band
+            const entryPct = barbSite ? 0.50 : 0.40;
+            const exitPct = barbSite ? 0.65 : 0.55;
+            const earlyPct = barbSite ? 0.55 : 0.45;
+            if (hp < Math.max(4, maxHp * entryPct)) this.recovering = true;
+            else if (hp >= maxHp * exitPct) this.recovering = false;
+            else if (this.recovering && !hunterNear && hp >= maxHp * earlyPct) this.recovering = false;
         } else {
             this.recovering = false;
         }
@@ -534,8 +538,13 @@ class LawBot {
         // starve the loot code if it sits below (v7.23: was after gear).
         const nearVault = Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) <= 8;
         const vaultCooldown = this.tick - this.vaultDropTick < 15;
+        if (this.tick % 100 === 0 && state.groundItems.length > 0) {
+            const nearby = state.groundItems.slice(0, 8).map(g => `${g.name}(${g.x},${g.z})`).join(', ');
+            console.log(`[${this.name}] GROUND-ITEMS [${state.groundItems.length}]: ${nearby}`);
+        }
         const lawPile = (nearVault || vaultCooldown) ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
         if (lawPile) {
+            console.log(`[${this.name}] LAW-PICKUP at (${lawPile.x},${lawPile.z}) laws=${this.laws}+${lawPile.count ?? '?'}`);
             this.exec({ type: 'pickupItem', x: lawPile.x, z: lawPile.z, itemId: lawPile.id, reason: 'LAW' });
             this.waitTicks = 3;
             return;
@@ -556,10 +565,8 @@ class LawBot {
         // are no men near the dark-wizard circle so circle units auto-target
         // dark wizards. Ramping units (cl<10) fight men only.
         const farFromCircle = Math.hypot(px - this.site.x, pz - this.site.z) > 30;
-        const towerSite = this.site.name === 'wizard-tower';
         const prey = ramping ? /^man$|^woman$/i
             : iceTier ? /^ice warrior$/i
-            : towerSite ? (farFromCircle ? /^wizard$/i : /^wizard$|^man$|^woman$/i)
             : farFromCircle ? /^dark wizard$/i
             : /^dark wizard$|^man$|^woman$/i;
         if (!this.recovering && this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
@@ -669,7 +676,7 @@ class LawBot {
             // z cap 3292 keeps this out of the farm-gate corridor (an east
             // walk at the gate shoves units off the doorway into the fence).
             // Tower bots march west — don't push them east.
-            const inLumbridge = !ramping && !towerSite && px < 3240 && pz > 3150 && pz < 3292;
+            const inLumbridge = !ramping && !barbSite && px < 3240 && pz > 3150 && pz < 3292;
 
             // Lumbridge-zone escape: prioritize walking east over opening doors
             // (castle doors lead deeper; east walk escapes the building zone).
@@ -821,7 +828,9 @@ class LawBot {
                 /^dark wizard$/i.test(n.name) && n.distance <= 2).length;
             const packed = state.nearbyNpcs.filter(n =>
                 /^dark wizard$/i.test(n.name) && n.distance <= 8).length;
-            if ((adjacent >= 2 && hp < maxHp * 0.60) || (packed >= 4 && hp < maxHp * 0.55)) {
+            const retreatAdj = barbSite ? 0.70 : 0.60;
+            const retreatPack = barbSite ? 0.65 : 0.55;
+            if ((adjacent >= 2 && hp < maxHp * retreatAdj) || (packed >= 4 && hp < maxHp * retreatPack)) {
                 if (this.tick % 40 === 0) {
                     console.log(`[${this.name}] CIRCLE-RETREAT ${packed} wizards packed, hp=${hp}/${maxHp}`);
                 }
@@ -837,7 +846,7 @@ class LawBot {
         const airsHeld = state.inventory.filter(i => /air rune/i.test(i.name)).reduce((a, i) => a + i.count, 0);
         const coinsNow = state.inventory.filter(i => /^coins$/i.test(i.name)).reduce((a, i) => a + i.count, 0);
         const atCircle = Math.hypot(px - anchor.x, pz - anchor.z) < 20;
-        if (!ramping && atCircle !== undefined && (mindsHeld < RUNE_MIN || airsHeld < RUNE_MIN) && coinsNow >= 100 &&
+        if (!ramping && !barbSite && atCircle !== undefined && (mindsHeld < RUNE_MIN || airsHeld < RUNE_MIN) && coinsNow >= 100 &&
             (atCircle || Math.hypot(px - AUBURY.x, pz - AUBURY.z) <= 15)) {
             if (Math.hypot(px - AUBURY.x, pz - AUBURY.z) > 2) {
                 this.walkToward(px, pz, AUBURY.x, AUBURY.z, 'rune-up');
@@ -891,7 +900,7 @@ class LawBot {
         const nextTier = GEAR_TIERS.find(g => g.tier > myTier && coinsHeld >= g.cost);
         const reachedCircle = this.marchWp >= this.wps.length ||
             Math.hypot(px - anchor.x, pz - anchor.z) < 16;
-        if (!ramping && nextTier && reachedCircle) {
+        if (!ramping && !barbSite && nextTier && reachedCircle) {
             if (Math.hypot(px - SWORDSHOP.x, pz - SWORDSHOP.z) > 3) {
                 this.exec({ type: 'walkTo', x: SWORDSHOP.x, z: SWORDSHOP.z, running: true, reason: 'gear up' });
                 this.waitTicks = 5;
@@ -974,7 +983,7 @@ class LawBot {
             // Lumbridge-escape: bots trapped in buildings/cabbage (west of x=3240,
             // south of z=3260) force-walk east before following waypoints.
             // Tower-bound bots march WEST — don't push them east.
-            if (!towerSite && px < 3240 && pz > 3150 && pz < 3292 && !inGateCorridor(px, pz)) {
+            if (!barbSite && px < 3240 && pz > 3150 && pz < 3292 && !inGateCorridor(px, pz)) {
                 // Fred's farm / cabbage patch (west of x=3228, north of z=3265)
                 // is fenced on its east side — the only exit is SOUTH along the
                 // sheep pen back to the road junction, then east as normal.
@@ -1037,7 +1046,7 @@ class LawBot {
 
             if (wpStall > 450) {
                 console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
-                const resetTile = towerSite
+                const resetTile = barbSite
                     ? { x: 3232, z: 3225 }
                     : { x: 3245, z: 3235 };
                 this.walkToward(px, pz, resetTile.x, resetTile.z, 'march-reset');
@@ -1131,7 +1140,7 @@ class LawBot {
 
             const wpIdx2 = Math.min(this.marchWp, this.wps.length - 1);
             const curWp = this.marchWp >= this.wps.length ? anchor : this.wps[wpIdx2];
-            if (towerSite) {
+            if (barbSite) {
                 this.exec({ type: 'walkTo', x: curWp.x, z: curWp.z, running: true, reason: 'march' });
             } else {
                 const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
@@ -1154,7 +1163,7 @@ class LawBot {
             // and wait there — the next wizard pops at distance 1 and we
             // pull before any walking rival reacts.
             if (!ramping && Math.hypot(px - this.site.x, pz - this.site.z) <= 20) {
-                const st = stationFor(this.name, this.site.name === 'wizard-tower' ? this.site.x : 3227, this.site.name === 'wizard-tower' ? this.site.z : 3370);
+                const st = stationFor(this.name, this.site.name === 'varrock-circle' ? 3227 : this.site.x, this.site.name === 'varrock-circle' ? 3370 : this.site.z);
                 if (Math.hypot(px - st.x, pz - st.z) > 2) {
                     this.walkToward(px, pz, st.x, st.z, 'station');
                     this.waitTicks = 2;
@@ -1258,7 +1267,7 @@ const report = setInterval(() => {
         return `${s.name}: ${members.length} units xp=${xph}`;
     }).join(' | ');
     console.log(
-        `[lawswarm] LAWSWARM laws=${totalLaws} deaths=${totalDeaths} online=${online}/${bots.length} :: ${perSite}`
+        `[lawswarm] ${new Date().toISOString().slice(11,19)}Z LAWSWARM laws=${totalLaws} deaths=${totalDeaths} online=${online}/${bots.length} :: ${perSite}`
     );
     for (const b of bots) {
         console.log(
