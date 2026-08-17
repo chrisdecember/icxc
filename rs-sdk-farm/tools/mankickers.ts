@@ -19,7 +19,9 @@ import type { Client } from '#/client/Client.js';
 import type { LiteClient } from './LiteClient.js';
 
 const PREY = /^man$|^woman$/i;
-const ATTACK_RETRY_TICKS = 6;
+// v2.1: 2-tick attack gate — a courtyard Man must be engaged within
+// ~1.2s of appearing. Reaction speed IS the product.
+const ATTACK_RETRY_TICKS = 2;
 const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
 // Punch window: ~25 ticks of Punch out of every 150 (kick-heavy, per spec).
@@ -33,6 +35,7 @@ const PUNCH_WINDOW = 25;
 // pickpocket in progress) is priority target #1.
 const ROUTES: { name: string; wps: { x: number; z: number }[] }[] = [
     { name: 'courtyard', wps: [{ x: 3222, z: 3218 }, { x: 3217, z: 3225 }, { x: 3225, z: 3227 }, { x: 3227, z: 3219 }] },
+    { name: 'courtyard-ccw', wps: [{ x: 3227, z: 3219 }, { x: 3225, z: 3227 }, { x: 3217, z: 3225 }, { x: 3222, z: 3218 }] },
     { name: 'castle-south', wps: [{ x: 3216, z: 3211 }, { x: 3210, z: 3214 }, { x: 3221, z: 3208 }] },
     { name: 'church', wps: [{ x: 3243, z: 3210 }, { x: 3247, z: 3215 }, { x: 3240, z: 3216 }, { x: 3246, z: 3206 }] },
     { name: 'bobs-hut', wps: [{ x: 3231, z: 3210 }, { x: 3228, z: 3204 }, { x: 3236, z: 3206 }] },
@@ -42,18 +45,37 @@ const ROUTES: { name: string; wps: { x: number; z: number }[] }[] = [
     { name: 'east-road', wps: [{ x: 3238, z: 3225 }, { x: 3233, z: 3228 }, { x: 3243, z: 3221 }] },
     { name: 'roam-west', wps: [{ x: 3211, z: 3214 }, { x: 3216, z: 3230 }, { x: 3214, z: 3244 }, { x: 3222, z: 3234 }, { x: 3218, z: 3220 }] },
     { name: 'roam-east', wps: [{ x: 3240, z: 3212 }, { x: 3243, z: 3222 }, { x: 3237, z: 3235 }, { x: 3232, z: 3222 }, { x: 3235, z: 3211 }] },
-    { name: 'roam-north', wps: [{ x: 3222, z: 3250 }, { x: 3232, z: 3248 }, { x: 3240, z: 3244 }, { x: 3228, z: 3240 }, { x: 3216, z: 3246 }] },
+    { name: 'courtyard-orbit', wps: [{ x: 3214, z: 3222 }, { x: 3220, z: 3230 }, { x: 3229, z: 3224 }, { x: 3224, z: 3214 }, { x: 3216, z: 3214 }] },
     { name: 'roam-core', wps: [{ x: 3222, z: 3215 }, { x: 3230, z: 3218 }, { x: 3238, z: 3218 }, { x: 3230, z: 3226 }, { x: 3222, z: 3226 }] },
     { name: 'sweep-cw', wps: [{ x: 3218, z: 3212 }, { x: 3240, z: 3212 }, { x: 3242, z: 3226 }, { x: 3236, z: 3244 }, { x: 3218, z: 3244 }, { x: 3216, z: 3226 }] },
     { name: 'sweep-ccw', wps: [{ x: 3216, z: 3226 }, { x: 3218, z: 3244 }, { x: 3236, z: 3244 }, { x: 3242, z: 3226 }, { x: 3240, z: 3212 }, { x: 3218, z: 3212 }] },
 ];
 
-const TAUNTS = [
-    'the men of lumbridge fear my feet',
-    'no purses for you today',
-    'kick first ask questions never',
-    'lumbridge is a no-pickpocket zone',
+// Dynamic taunt engine: 20 templates filled with live context (kick
+// count, route, CL, target) and rotated without repeats per unit.
+const TAUNT_TEMPLATES: ((c: { n: number; route: string; cl: number; target: string }) => string)[] = [
+    c => `${c.n} men kicked and counting`,
+    c => `no purses on ${c.route} today`,
+    c => `the ${c.route} beat is protected`,
+    c => `that ${c.target.toLowerCase()} is spoken for`,
+    c => `cl ${c.cl} feet move faster than your fingers`,
+    c => `pickpockets report to lumbridge for disappointment`,
+    c => `we kick so you cannot thieve`,
+    c => `${c.target.toLowerCase()} liberated from your greed`,
+    c => `stat check: ${c.n} kicks, zero mercy`,
+    c => `the golden throne taxes in bruises`,
+    c => `try draynor. actually dont, we are expanding`,
+    c => `this ${c.target.toLowerCase()} belongs to the kick economy`,
+    c => `${c.route} patrol: all men accounted for`,
+    c => `your thieving xp just flatlined`,
+    c => `fastest feet on ${c.route}`,
+    c => `kick ${c.n} dedicated to slow thieves`,
+    c => `men of lumbridge sleep safe. unconscious, but safe`,
+    c => `apply for a thieving licence elsewhere`,
+    c => `deterrence is a full time job`,
+    c => `${c.cl} combat levels of no`,
 ];
+const TAUNT_COOLDOWN = 500; // ticks (~5 min per unit; a taunt somewhere every ~20s fleet-wide)
 
 class KickBot {
     private session: LiteSession | null = null;
@@ -86,6 +108,7 @@ class KickBot {
     styleNow = '?';
 
     private wpIdx = 0;
+    private tauntIdx = Math.floor(Math.random() * TAUNT_TEMPLATES.length);
     interrupts = 0;
 
     constructor(
@@ -246,7 +269,7 @@ class KickBot {
         // Rest when low — dead kickers respawn on station anyway, but resting
         // keeps uptime higher than corpse-running.
         if (maxHp > 0 && hp > 0 && hp < Math.max(4, maxHp * 0.3)) {
-            this.waitTicks = 30;
+            this.waitTicks = 15;
             return;
         }
 
@@ -314,13 +337,17 @@ class KickBot {
             this.lastAttackTick = this.tick;
             if (!this.lastFailure) {
                 if (punchTime) this.punches++; else this.kicks++;
-                if (beingRobbed(target)) {
+                const robbed = beingRobbed(target);
+                if (robbed) {
                     this.interrupts++;
                     if (this.interrupts % 10 === 1) console.log(`[${this.name}] INTERRUPT #${this.interrupts} — kicked a Man out of a rival's hands at (${target.x},${target.z})`);
                 }
-                if (this.tick - this.lastTaunt > 3000 && (this.kicks + this.punches) % 250 === 100) {
+                // Dynamic taunt rotation: always on an interdiction, else
+                // every 40th kick — cooldown-gated per unit.
+                if (this.tick - this.lastTaunt > TAUNT_COOLDOWN && (robbed || (this.kicks + this.punches) % 40 === 0)) {
                     this.lastTaunt = this.tick;
-                    this.exec({ type: 'say', message: TAUNTS[(this.kicks + this.tick) % TAUNTS.length], reason: 'taunt' });
+                    const make = TAUNT_TEMPLATES[this.tauntIdx++ % TAUNT_TEMPLATES.length];
+                    this.exec({ type: 'say', message: make({ n: this.kicks + this.punches, route: this.route.name, cl: this.cl, target: target.name }), reason: 'taunt' });
                 }
             }
             return;
@@ -329,8 +356,8 @@ class KickBot {
         // Stalk a visible-but-unreachable target, but only near the route —
         // chasing beyond leash distance traps bots at gates/walls (mankicker8).
         if (!target && visible && toAnchor <= 15) {
-            this.exec({ type: 'walkTo', x: visible.x, z: visible.z, running: false, reason: 'stalk' });
-            this.waitTicks = 3;
+            this.exec({ type: 'walkTo', x: visible.x, z: visible.z, running: true, reason: 'stalk' });
+            this.waitTicks = 1;
             return;
         }
 
@@ -338,8 +365,8 @@ class KickBot {
         // network IS the coverage; a standing kicker is mission failure.
         this.advanceWp(px, pz);
         const wp = this.anchor;
-        this.exec({ type: 'walkTo', x: wp.x, z: wp.z, running: toAnchor > 10, reason: 'patrol' });
-        this.waitTicks = 2;
+        this.exec({ type: 'walkTo', x: wp.x, z: wp.z, running: toAnchor > 6, reason: 'patrol' });
+        this.waitTicks = 1;
     }
 }
 
