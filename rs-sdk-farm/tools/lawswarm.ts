@@ -439,6 +439,12 @@ class LawBot {
         const stuckDuration = this.tick - this.lastProgressTick;
         if (stuckDuration > 600) {
             this.deepStuckCount++;
+            if (this.deepStuckCount >= 5) {
+                console.warn(`[${this.name}] PERMANENT-STUCK at (${px},${pz}) after ${this.deepStuckCount} cycles — idling`);
+                this.lastProgressTick = this.tick;
+                this.waitTicks = 600;
+                return;
+            }
             console.warn(`[${this.name}] DEEP-STUCK ${stuckDuration} ticks at (${px},${pz}) cycle=${this.deepStuckCount} — force relogin`);
             if (this.deepStuckCount >= 2 && this.cl < RAMP_UNTIL) {
                 this.cl = RAMP_UNTIL;
