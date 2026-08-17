@@ -41,7 +41,8 @@ const SITES = [
 // castle walls — bots oscillated at (3208-3220,3207-3231) for 500+ ticks
 // and never arrived. Route south first to bypass the castle.
 const TOWER_WAYPOINTS = [
-    { x: 3224, z: 3198, r: 10 },
+    { x: 3224, z: 3198, r: 8 },
+    { x: 3210, z: 3196, r: 8 },
     { x: 3198, z: 3195, r: 10 },
     { x: 3180, z: 3208, r: 10 },
     { x: 3160, z: 3205, r: 10 },
@@ -997,7 +998,7 @@ class LawBot {
             // Tower castle escape: tower bots spawn in the Lumbridge castle
             // courtyard/interior and can't BFS through walls south to wp0.
             // Walk east past the gate to the road, then the march takes over.
-            if (towerSite && px >= 3200 && px <= 3228 && pz >= 3208 && pz <= 3225) {
+            if (towerSite && this.marchWp < 0 && px >= 3200 && px <= 3228 && pz >= 3208 && pz <= 3225) {
                 if (this.tick % 60 === 0) {
                     console.log(`[${this.name}] CASTLE-ESCAPE (${px},${pz}) -> east road`);
                 }
@@ -1044,10 +1045,7 @@ class LawBot {
                 console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${this.wps.length} stall=${wpStall}`);
             }
 
-            // Hard reset: 800+ ticks stuck on the same waypoint means the
-            // local geometry has beaten every probe. Walk to a known-good
-            // open-ground tile and restart the march from there.
-            if (wpStall > 800) {
+            if (wpStall > 450) {
                 console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
                 const resetTile = towerSite
                     ? { x: 3224, z: 3198 }
@@ -1136,7 +1134,8 @@ class LawBot {
                 const step = Math.min(12, fd);
                 const tx = Math.round(px + ((fx - px) / fd) * step);
                 const tz = Math.round(pz + ((fz - pz) / fd) * step);
-                this.walkToward(px, pz, tx, tz, 'march-force');
+                const forced = this.walkToward(px, pz, tx, tz, 'march-force');
+                if (forced) this.lastProgressTick = this.tick;
                 this.lastFailure = '';
                 this.forceCount++;
                 if (this.forceCount % 15 === 1) {
