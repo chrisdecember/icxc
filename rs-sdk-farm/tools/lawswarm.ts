@@ -473,6 +473,16 @@ class LawBot {
             this.waitTicks = 3;
             return;
         }
+        // Stone-field escape: barb bots trapped among the stones/boulders
+        // at (3175-3187, 3305-3322) can't walk east. Walk north through
+        // the open gate, past the obstacle belt, then resume march.
+        if (barbSite && px < 3188 && pz >= 3305 && pz <= 3322) {
+            if (this.tick % 40 === 0) console.log(`[${this.name}] STONE-ESCAPE at (${px},${pz}) — walking north`);
+            this.walkToward(px, pz, px, 3340, 'stone-escape');
+            this.lastProgressTick = this.tick;
+            this.waitTicks = 3;
+            return;
+        }
 
         // v7.30 ramp-return: a ramping unit far from the training field
         // has NO code path home — it hunts Men only, and there are none
@@ -481,10 +491,11 @@ class LawBot {
         // before anything else.
         if (ramping && Math.hypot(px - RAMP.x, pz - RAMP.z) > 25) {
             if (this.tick % 80 === 0) console.log(`[${this.name}] RAMP-RETURN from (${px},${pz})`);
-            // West-of-road trap: walk east first to escape obstacles
+            // Obstacle belt (z=3280-3325): walk south to clear it, then
+            // normal ramp-return handles the rest.
             if (px < 3225 && pz >= 3280 && pz <= 3325) {
-                this.walkToward(px, pz, 3250, pz, 'ramp-east-escape');
-                if (this.tick % 40 === 0) console.log(`[${this.name}] RAMP-EAST at (${px},${pz}) — escaping east`);
+                this.walkToward(px, pz, px, 3260, 'ramp-south-escape');
+                if (this.tick % 40 === 0) console.log(`[${this.name}] RAMP-SOUTH at (${px},${pz}) — escaping south`);
             } else {
                 this.walkToward(px, pz, RAMP.x, RAMP.z, 'ramp-return');
             }
