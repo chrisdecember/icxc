@@ -273,6 +273,11 @@ bank runs, zero deaths at the current vault position.
 | ops | zombie sessions: bot online in state but receiving no game ticks (TCP half-open, server stale) | zombie reaper every 120s: no tick for 180s → forceDisconnect + relogin |
 | ops | crash-loop: bot disconnects within 30s of connect, hammers server with rapid relogins | crash-loop detection: uptime < 30s → 30s initial backoff instead of default 5s |
 | ops | 6h game server login outage (05:00-11:56 UTC 2026-08-17) killed all sessions | server-monitor.sh + watchdog.sh + relogin backoff + send_later check-ins auto-recovered; SIGTERM handler for clean shutdown |
+| v7.35 | tower wp0 at (3190,3212) sent bots straight west through Lumbridge castle walls — BFS can't path through walls, bots oscillated at (3208-3220,3207-3231) for 500+ ticks, zero tower production | rerouted TOWER_WAYPOINTS south first: wp0→(3224,3198) on east road, 7 waypoints bypassing castle entirely. Moral: **trace the actual walking path on the map before committing waypoints** |
+| v7.35 | tower bots spawned inside Lumbridge castle courtyard (3200-3228,3208-3225) couldn't BFS south through castle walls to reach wp0 | CASTLE-ESCAPE: when in castle zone, walkToward (3233,3215) on the east road before starting march. Moral: every nav route needs an explicit "escape spawn" phase |
+| v7.35 | deep-stuck failsafe never fired for bots holding laws from previous sessions — `laws > 0` permanently reset the progress timer | removed `laws > 0` check; atAnchor alone tracks fighting-site presence. Holding laws ≠ making progress |
+| v7.35 | MARCH-FORCE used single-target `exec walkTo` which fails entirely when BFS can't reach the exact target tile (trees at tower approach wp5-6) | upgraded MARCH-FORCE to use `walkToward` with 9-angle probing; shorter steps but much more reliable through obstacle clusters |
+| v7.35 | deep-stuck force-disconnect respawns bot at same location (logout, not death) — stuck bots cycle infinitely at the same spot | known limitation: deep-stuck is a safety net, not a fix; bots need to die or teleport to actually change position. Route fixes are the real solution |
 
 ## 10. Telemetry & ops patterns that worked
 
