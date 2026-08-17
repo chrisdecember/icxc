@@ -43,8 +43,9 @@ const BARB_WAYPOINTS = [
     { x: 3210, z: 3242, r: 10 },  // northwest to open ground
     { x: 3192, z: 3258, r: 10 },  // west-northwest
     { x: 3178, z: 3280, r: 10 },  // northwest
-    { x: 3175, z: 3305, r: 10 },  // north — wide east of wizard tower
-    { x: 3180, z: 3340, r: 10 },  // north — well east of tower (3109,3354)
+    { x: 3190, z: 3305, r: 8 },   // north — east of stones/boulders at (3180,3310)
+    { x: 3190, z: 3325, r: 8 },   // north — past stone obstacle
+    { x: 3185, z: 3340, r: 10 },  // north — well east of tower (3109,3354)
     { x: 3175, z: 3370, r: 10 },  // north — safely east of tower
     { x: 3150, z: 3395, r: 10 },  // northwest — past tower zone
     { x: 3100, z: 3410, r: 10 },  // west to village approach
@@ -480,7 +481,13 @@ class LawBot {
         // before anything else.
         if (ramping && Math.hypot(px - RAMP.x, pz - RAMP.z) > 25) {
             if (this.tick % 80 === 0) console.log(`[${this.name}] RAMP-RETURN from (${px},${pz})`);
-            this.walkToward(px, pz, RAMP.x, RAMP.z, 'ramp-return');
+            // West-of-road trap: walk east first to escape obstacles
+            if (px < 3225 && pz >= 3280 && pz <= 3325) {
+                this.walkToward(px, pz, 3250, pz, 'ramp-east-escape');
+                if (this.tick % 40 === 0) console.log(`[${this.name}] RAMP-EAST at (${px},${pz}) — escaping east`);
+            } else {
+                this.walkToward(px, pz, RAMP.x, RAMP.z, 'ramp-return');
+            }
             this.waitTicks = 3;
             return;
         }
