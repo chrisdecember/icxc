@@ -439,7 +439,7 @@ class LawBot {
         const stuckDuration = this.tick - this.lastProgressTick;
         if (stuckDuration > 600) {
             this.deepStuckCount++;
-            if (this.deepStuckCount >= 5) {
+            if (this.deepStuckCount >= 8) {
                 console.warn(`[${this.name}] PERMANENT-STUCK at (${px},${pz}) after ${this.deepStuckCount} cycles — idling`);
                 this.lastProgressTick = this.tick;
                 this.waitTicks = 600;
