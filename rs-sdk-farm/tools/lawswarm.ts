@@ -48,7 +48,12 @@ const TRACE_FILE = new URL('../../../../logs/lawtrace.jsonl', import.meta.url).p
 const ICE_ENTRANCE = { x: 3008, z: 3150 };
 const ICE_SITE = { name: 'asgarnian-ice-dungeon', x: 3044, z: 9581 };
 const SWORDSHOP = { x: 3203, z: 3397 };
-const RAMP_UNTIL = 10; // avg(atk,str,def,hp) before graduating to dark wizards
+// v7.29: graduate at CL 27, past the dark wizards' aggro threshold
+// (2x13=26). Sub-26 units at the circle get ganged by every wizard in
+// range and live in recovery purgatory at the NE rest spot — the
+// "standing in the corner doing nothing" crowd. Men are safe, solo,
+// and train the same stats; arrive untouchable or don't arrive.
+const RAMP_UNTIL = 27;
 // v7.27: 3-tick gate — the circle is contested by rival farmers; claim
 // speed on fresh wizard spawns decides the kill share.
 const ATTACK_RETRY_TICKS = 3;
