@@ -272,6 +272,32 @@ bank runs, zero deaths at the current vault position.
 - Dashboard: single self-contained HTML artifact, republished on each
   pulse (fleet tiles, per-bot sparklines, status pills).
 
+## 10b. The Ultimate Law Monopoly — master plan (2026-08-17)
+
+Scale doctrine adopted after circle spawn-saturation was proven (7
+units + rivals split a fixed spawn pool: xp flowed, laws didn't).
+Production is a portfolio, not one site:
+
+| Stream | Units | Status |
+|---|---|---|
+| Dark-wizard circle | 5 veterans + trainee inflow | live, contested |
+| Ice dungeon (7/128) | 3 SDK pilots (gtlaw15/07/14) | live, uncontested |
+| Wizards' Tower (lvl-9 wizards drop laws) | candidate site | recon (probe v4) |
+| Shop buying (Aubury stock?) | thief-gold funded | recon (probe v4) |
+| Runecrafting (Law altar, RC 54, Entrana) | long-term | deferred — needs Rune Mysteries + RC grind |
+| Buying desk (player trades) | gtvault ads | live, no traffic |
+
+**Training pipeline**: fresh accounts ramp on Lumbridge men (cl<10) →
+circle service → promote to ice at CL ~50 (hobgoblin immunity at 56).
+Cohort 2 = gtlaw03/05/08-13. Promotion = copy the generic
+icepilot-script.ts into bots/<name>/ and swap the account from the
+lawswarm roster to an SDK runner+brain pair.
+
+**Safety layer**: watchdog.sh relaunches any dead component every
+120s (survives crashes within a container life; the pulse ps-check
+covers container restarts). Ice pilots carry the three-layer sustain
+doctrine (leash / food / hardened ladder escape).
+
 ## 11. Roadmap for a better bot (ranked)
 
 1. **Fix XP telemetry** — find the real xp field in lite skill state (or

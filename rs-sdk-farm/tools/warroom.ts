@@ -71,18 +71,26 @@ for (const s of kickSeries) { if (s.k < prevK) { lifetimeKicks += prevK; lifetim
 lifetimeKicks += Math.max(0, prevK);
 const nowKP = kickSeries.at(-1) ?? { k: 0, p: 0 };
 
-// ---- ice pilot (gtlaw15 SDK brain): laws carried + Draynor bank runs
-const ice = read("gtlaw15.log").split("\n");
-let iceLaws = 0, iceBanks = 0, iceRetreats = 0, iceStatus = "offline";
-for (const ln of ice) {
-  const l = ln.match(/laws=(\d+)/); if (l) iceLaws = +l[1];
-  const lt = ln.match(/LOOT laws -> (\d+)/); if (lt) iceLaws = +lt[1];
-  if (ln.includes("[ICE] BANKED at Draynor")) { iceBanks++; iceLaws = 0; }
-  if (ln.includes("[ICE] RETREAT")) iceRetreats++;
-  if (ln.includes("[ICE] pilot online")) iceStatus = "marching";
-  if (ln.includes("[ICE] descended")) iceStatus = "underground";
-  if (ln.includes("[ICE] BANK-RUN")) iceStatus = "banking";
+// ---- ice squad (SDK brains): laws carried + Draynor bank runs per pilot
+const ICE_PILOTS = ["gtlaw15", "gtlaw07", "gtlaw14"];
+let iceLaws = 0, iceBanks = 0, iceRetreats = 0;
+const iceRows: string[] = [];
+for (const name of ICE_PILOTS) {
+  const ice = read(`${name}.log`).split("\n");
+  let l15 = 0, b = 0, r = 0, status = "offline";
+  for (const ln of ice) {
+    const l = ln.match(/laws=(\d+)/); if (l) l15 = +l[1];
+    const lt = ln.match(/LOOT laws -> (\d+)/); if (lt) l15 = +lt[1];
+    if (ln.includes("BANKED at Draynor")) { b++; l15 = 0; }
+    if (ln.includes("[ICE] RETREAT") || ln.includes("EMERGENCY")) r++;
+    if (ln.includes("pilot") && ln.includes("online")) status = "marching";
+    if (ln.includes("descended")) status = "underground";
+    if (ln.includes("BANK-RUN")) status = "banking";
+  }
+  iceLaws += l15; iceBanks += b; iceRetreats += r;
+  iceRows.push(`${name}: ${status} · carrying ${l15} · ${b} banks · ${r} retreats`);
 }
+const iceStatus = iceRows.join("<br>");
 
 // ---- derived metrics
 const W = Math.min(30, lawsSeries.length - 1); // ~last hour of reports
@@ -263,8 +271,8 @@ font-size:.66rem;padding:.25rem .5rem;border-radius:3px;display:none;font-varian
   <div class="panel"><h2>Pipeline events</h2>
     <ul class="feed">${feed || "<li>quiet</li>"}</ul>
     <div class="u-ft" style="margin-top:.5rem">gtvault holding ${holding} · banks at 10 · ${bankRuns.length} runs total</div>
-    <h2 style="margin-top:.8rem">Ice tier — gtlaw15 pilot (7/128 drops)</h2>
-    <div class="u-ft">status: ${iceStatus} · carrying ${iceLaws} laws · ${iceBanks} Draynor bank runs · ${iceRetreats} ladder retreats</div>
+    <h2 style="margin-top:.8rem">Ice squad — 3 pilots (7/128 drops)</h2>
+    <div class="u-ft">${iceStatus}</div>
   </div>
 </div>
 <div class="tip" id="tip"></div>
