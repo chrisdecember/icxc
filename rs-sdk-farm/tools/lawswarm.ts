@@ -705,10 +705,17 @@ class LawBot {
         // Retreat when swarmed: 4+ dark wizards inside 8 tiles at low HP.
         // Aligned with recovery threshold (55%) so bots fight instead of
         // oscillating between circle and rest spot (v7.22: was 3/80%).
+        // v7.32 gang valve: in the aggro band (CL<44) multiple lvl-22
+        // wizards pile one unit and can burst 6-12hp between ticks —
+        // killed gtlaw02 through the thin rest band. ADJACENT count at
+        // 2 tiles catches an active gang early; the old 8-tile pack
+        // count stays for crowds.
         if (!ramping && Math.hypot(px - anchor.x, pz - anchor.z) <= 14) {
+            const adjacent = state.nearbyNpcs.filter(n =>
+                /^dark wizard$/i.test(n.name) && n.distance <= 2).length;
             const packed = state.nearbyNpcs.filter(n =>
                 /^dark wizard$/i.test(n.name) && n.distance <= 8).length;
-            if (packed >= 4 && hp < maxHp * 0.55) {
+            if ((adjacent >= 2 && hp < maxHp * 0.60) || (packed >= 4 && hp < maxHp * 0.55)) {
                 if (this.tick % 40 === 0) {
                     console.log(`[${this.name}] CIRCLE-RETREAT ${packed} wizards packed, hp=${hp}/${maxHp}`);
                 }
