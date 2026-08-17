@@ -3,8 +3,8 @@
 //   cd server/webclient
 //   bun src/lite/lawswarm.ts gtlaw01 gtlaw02 ... [--minutes=N]
 //
-// Dark wizards drop 3x law runes at 1/128 — two sites:
-// south of Varrock (3225,3374) and Barbarian Village (3082,3420).
+// Two law-rune sites: dark wizards south of Varrock (3225,3374),
+// barbarians at Barbarian Village (3082,3420) — both drop law runes.
 // Each bot ramps on Lumbridge men until its melee holds, then works its assigned
 // circle: attack, loot law runes (and adjacent coins), rest when low.
 // Per-bot XP-rate telemetry reveals spawn saturation per site — the data
@@ -28,9 +28,8 @@ import type { LiteClient } from './LiteClient.js';
 const RAMP = { x: 3222, z: 3222 };
 // Lumbridge-zone removed: no dark wizards spawn there (only men/rats).
 // All graduated units converge on the Varrock circle.
-// v7.36 second front: Barbarian Village dark wizards. Beefy (high lvl)
-// but they drop 3x law runes at 1/128 — same as varrock circle. Zero
-// rival farmers there. Units alternate sites by roster index.
+// v7.36 second front: Barbarian Village barbarians drop law runes.
+// Zero rival farmers there. Units alternate sites by roster index.
 const SITES = [
     { name: 'varrock-circle', x: 3225, z: 3374 },
     { name: 'barb-village', x: 3082, z: 3420 },
@@ -461,7 +460,8 @@ class LawBot {
         // floor — a rest cycle is ~20s of shaking the gang, not 5min of
         // standing. Full-heal exit stays as the fallback.
         if (!ramping && maxHp > 0 && hp > 0) {
-            const hunterNear = state.nearbyNpcs.some(n => /^dark wizard$/i.test(n.name) && n.distance <= 10);
+            const hunterPat = barbSite ? /^barbarian$|^barbarian woman$/i : /^dark wizard$/i;
+            const hunterNear = state.nearbyNpcs.some(n => hunterPat.test(n.name) && n.distance <= 10);
             // Barb-village dark wizards are beefy — wider recovery band
             const entryPct = barbSite ? 0.50 : 0.40;
             const exitPct = barbSite ? 0.65 : 0.55;
@@ -567,6 +567,7 @@ class LawBot {
         const farFromCircle = Math.hypot(px - this.site.x, pz - this.site.z) > 30;
         const prey = ramping ? /^man$|^woman$/i
             : iceTier ? /^ice warrior$/i
+            : barbSite ? /^barbarian$|^barbarian woman$/i
             : farFromCircle ? /^dark wizard$/i
             : /^dark wizard$|^man$|^woman$/i;
         if (!this.recovering && this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
@@ -824,10 +825,11 @@ class LawBot {
         // 2 tiles catches an active gang early; the old 8-tile pack
         // count stays for crowds.
         if (!ramping && Math.hypot(px - anchor.x, pz - anchor.z) <= 14) {
+            const threatPat = barbSite ? /^barbarian$|^barbarian woman$/i : /^dark wizard$/i;
             const adjacent = state.nearbyNpcs.filter(n =>
-                /^dark wizard$/i.test(n.name) && n.distance <= 2).length;
+                threatPat.test(n.name) && n.distance <= 2).length;
             const packed = state.nearbyNpcs.filter(n =>
-                /^dark wizard$/i.test(n.name) && n.distance <= 8).length;
+                threatPat.test(n.name) && n.distance <= 8).length;
             const retreatAdj = barbSite ? 0.70 : 0.60;
             const retreatPack = barbSite ? 0.65 : 0.55;
             if ((adjacent >= 2 && hp < maxHp * retreatAdj) || (packed >= 4 && hp < maxHp * retreatPack)) {
@@ -1163,6 +1165,10 @@ class LawBot {
             // and wait there — the next wizard pops at distance 1 and we
             // pull before any walking rival reacts.
             if (!ramping && Math.hypot(px - this.site.x, pz - this.site.z) <= 20) {
+                if (barbSite && this.tick % 100 === 0) {
+                    const allNpcs = state.nearbyNpcs.slice(0, 12).map(n => `${n.name}(d=${n.distance},reach=${n.reachable})`).join(', ');
+                    console.log(`[${this.name}] NPC-SCAN at (${px},${pz}) [${state.nearbyNpcs.length} total]: ${allNpcs || 'NONE'}`);
+                }
                 const st = stationFor(this.name, this.site.name === 'varrock-circle' ? 3227 : this.site.x, this.site.name === 'varrock-circle' ? 3370 : this.site.z);
                 if (Math.hypot(px - st.x, pz - st.z) > 2) {
                     this.walkToward(px, pz, st.x, st.z, 'station');
