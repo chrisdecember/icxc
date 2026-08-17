@@ -352,6 +352,18 @@ class LawBot {
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
 
+        // v7.30 ramp-return: a ramping unit far from the training field
+        // has NO code path home — it hunts Men only, and there are none
+        // at the circle, so demoted trainees stood there bricked while
+        // wizard gangs chewed them (gtlaw09/11). March back to Lumbridge
+        // before anything else.
+        if (ramping && Math.hypot(px - RAMP.x, pz - RAMP.z) > 25) {
+            if (this.tick % 80 === 0) console.log(`[${this.name}] RAMP-RETURN from (${px},${pz})`);
+            this.walkToward(px, pz, RAMP.x, RAMP.z, 'ramp-return');
+            this.waitTicks = 3;
+            return;
+        }
+
         // Recovery mode with hysteresis: enter at <45% hp, exit at >=65% —
         // attacks stay SUPPRESSED while recovering (gated below).
         // v7.25: was 55/85. Post aggro-flip nothing chases a resting unit,
@@ -360,9 +372,12 @@ class LawBot {
         // east corner while gtlaw15 alone earned half the swarm xp). The
         // narrow band halves regen wait; wizards max-hit ~2, so 45% of a
         // 35+ hp pool still leaves a deep buffer.
+        // v7.30: tightened again to [40,55) — vets were still visibly
+        // parked at the NE rest spot half the time. Retaliation-only
+        // damage (max-hit ~2) makes a 40% floor of a 36+ pool safe.
         if (!ramping && maxHp > 0 && hp > 0) {
-            if (hp < Math.max(4, maxHp * 0.45)) this.recovering = true;
-            else if (hp >= maxHp * 0.65) this.recovering = false;
+            if (hp < Math.max(4, maxHp * 0.40)) this.recovering = true;
+            else if (hp >= maxHp * 0.55) this.recovering = false;
         } else {
             this.recovering = false;
         }
