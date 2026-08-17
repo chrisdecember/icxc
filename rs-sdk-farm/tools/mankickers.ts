@@ -77,6 +77,12 @@ const TAUNT_TEMPLATES: ((c: { n: number; route: string; cl: number; target: stri
 ];
 const TAUNT_COOLDOWN = 500; // ticks (~5 min per unit; a taunt somewhere every ~20s fleet-wide)
 
+// Shared claims board (all units live in this process): once a unit
+// engages npc slot N, packmates skip N and fan out to OTHER Men —
+// four courtyard units piling one Man while three stand free was the
+// biggest coverage leak. Claims expire after 15s or on kill.
+const CLAIMS = new Map<number, { by: string; at: number }>();
+
 class KickBot {
     private session: LiteSession | null = null;
     private client: LiteClient | null = null;
@@ -345,17 +351,23 @@ class KickBot {
             this.waitTicks = 2;
             return;
         }
+        const claimedByOther = (n: { index: number }) => {
+            const c = CLAIMS.get(n.index);
+            return !!c && c.by !== this.name && Date.now() - c.at < 15_000;
+        };
         const interdiction = preyAll.find(n => beingRobbed(n) && n.reachable !== false);
         const target = interdiction
             ?? (locked && this.lockIndex >= 0 && locked.reachable !== false ? locked : undefined)
+            ?? preyAll.find(n => n.reachable !== false && !claimedByOther(n))
             ?? preyAll.find(n => n.reachable !== false);
-        const visible = preyAll[0];
+        const visible = preyAll.find(n => !claimedByOther(n)) ?? preyAll[0];
 
         if (target && this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
             const opt = target.optionsWithIndex.find(o => /attack/i.test(o.text))!;
             this.exec({ type: 'interactNpc', npcIndex: target.index, optionIndex: opt.opIndex, reason: punchTime ? 'punch' : 'KICK' });
             this.lastAttackTick = this.tick;
             if (this.lockIndex !== target.index) { this.lockIndex = target.index; this.lockSince = this.tick; }
+            CLAIMS.set(target.index, { by: this.name, at: Date.now() });
             if (!this.lastFailure) {
                 if (punchTime) this.punches++; else this.kicks++;
                 const robbed = beingRobbed(target);
