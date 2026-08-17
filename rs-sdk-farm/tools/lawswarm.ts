@@ -472,15 +472,29 @@ class LawBot {
             this.waitTicks = 3;
             return;
         }
-        // Stone-field escape: barb bots trapped among the stones/boulders
-        // at (3175-3187, 3305-3322) can't walk east (stones) or north
-        // (gate blocks). Walk SOUTH to clear the obstacle belt, then the
-        // march route picks up from WP5. Don't reset lastProgressTick —
-        // if south also fails, DEEP-STUCK must still fire as a fallback.
-        if (barbSite && px < 3188 && pz >= 3305 && pz <= 3322) {
-            if (this.tick % 40 === 0) console.log(`[${this.name}] STONE-ESCAPE at (${px},${pz}) — walking south`);
-            this.walkToward(px, pz, px, 3280, 'stone-escape');
-            this.waitTicks = 3;
+        // Dead-zone escape: barb bots trapped in the fenced obstacle zone
+        // (x<3220, z=3295-3322) where multi-tile walks are rejected. Try
+        // 1-tile walks east/south to inch out. walkToward's 2-tile min
+        // crosses invisible collision boundaries; 1-tile adjacent walks
+        // may succeed where multi-tile walks don't.
+        if (barbSite && px < 3220 && pz >= 3295 && pz <= 3322) {
+            const dirs = [
+                { x: px + 1, z: pz },     // east
+                { x: px + 1, z: pz - 1 }, // southeast
+                { x: px, z: pz - 1 },     // south
+                { x: px + 1, z: pz + 1 }, // northeast
+                { x: px - 1, z: pz - 1 }, // southwest
+                { x: px, z: pz + 1 },     // north
+            ];
+            for (const d of dirs) {
+                this.exec({ type: 'walkTo', x: d.x, z: d.z, running: false, reason: 'dead-zone-inch' });
+                if (!this.lastFailure) {
+                    this.lastProgressTick = this.tick;
+                    break;
+                }
+            }
+            if (this.tick % 40 === 0) console.log(`[${this.name}] DEAD-ZONE at (${px},${pz}) — 1-tile escape`);
+            this.waitTicks = 2;
             return;
         }
 
