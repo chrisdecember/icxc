@@ -109,6 +109,8 @@ class KickBot {
 
     private wpIdx = 0;
     private tauntIdx = Math.floor(Math.random() * TAUNT_TEMPLATES.length);
+    private lockIndex = -1;
+    private lockSince = 0;
     interrupts = 0;
 
     constructor(
@@ -328,13 +330,32 @@ class KickBot {
                 const br = b.reachable !== false ? 0 : 1;
                 return ar - br || a.distance - b.distance;
             });
-        const target = preyAll.find(n => n.reachable !== false);
+        // FINISH THE KILL: once engaged, stay on that exact npc until it
+        // dies (index vanishes) or a 40-tick lock expires — re-targeting
+        // every gate tick made units ping-pong between wandering Men and
+        // finish nothing. While actively trading blows with the locked
+        // target, do NOT re-click or walk; let the fight resolve. Only a
+        // live pickpocket interdiction may preempt a lock.
+        const locked = this.lockIndex >= 0
+            ? state.nearbyNpcs.find(n => n.index === this.lockIndex && PREY.test(n.name))
+            : undefined;
+        if (!locked || this.tick - this.lockSince > 40) this.lockIndex = -1;
+        const combat = (state.player as any).combat;
+        if (locked && this.lockIndex >= 0 && combat?.inCombat && combat.targetIndex === this.lockIndex) {
+            this.waitTicks = 2;
+            return;
+        }
+        const interdiction = preyAll.find(n => beingRobbed(n) && n.reachable !== false);
+        const target = interdiction
+            ?? (locked && this.lockIndex >= 0 && locked.reachable !== false ? locked : undefined)
+            ?? preyAll.find(n => n.reachable !== false);
         const visible = preyAll[0];
 
         if (target && this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
             const opt = target.optionsWithIndex.find(o => /attack/i.test(o.text))!;
             this.exec({ type: 'interactNpc', npcIndex: target.index, optionIndex: opt.opIndex, reason: punchTime ? 'punch' : 'KICK' });
             this.lastAttackTick = this.tick;
+            if (this.lockIndex !== target.index) { this.lockIndex = target.index; this.lockSince = this.tick; }
             if (!this.lastFailure) {
                 if (punchTime) this.punches++; else this.kicks++;
                 const robbed = beingRobbed(target);
