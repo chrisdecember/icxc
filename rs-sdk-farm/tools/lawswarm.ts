@@ -28,9 +28,30 @@ import type { LiteClient } from './LiteClient.js';
 const RAMP = { x: 3222, z: 3222 };
 // Lumbridge-zone removed: no dark wizards spawn there (only men/rats).
 // All graduated units converge on the Varrock circle.
+// v7.35 second front: the Wizards' Tower (probe-verified 2026-08-17):
+// 4 lvl-9 wizard spawns, law droppers, ZERO rival farmers, and lvl-9
+// aggro (<18) barely touches anyone. Fast kills beat slow drop tables —
+// laws/hr is kill-count-bound. Units alternate sites by roster index.
 const SITES = [
     { name: 'varrock-circle', x: 3225, z: 3374 },
+    { name: 'wizard-tower', x: 3109, z: 3163 },
 ];
+// Tower route: Lumbridge -> the west road -> Draynor outskirts -> tower.
+// Open road terrain; MARCH-FORCE grinds through the rough spots.
+const TOWER_WAYPOINTS = [
+    { x: 3190, z: 3212, r: 10 },
+    { x: 3170, z: 3208, r: 10 },
+    { x: 3150, z: 3205, r: 10 },
+    { x: 3136, z: 3201, r: 10 },
+    { x: 3120, z: 3190, r: 10 },
+    { x: 3110, z: 3170, r: 8 },
+];
+// Per-site law sinks. gtvault runs a two-stop patrol: Varrock vault ->
+// Varrock West bank, tower vault -> Draynor bank (right next door).
+const VAULTS: Record<string, { x: number; z: number }> = {
+    'varrock-circle': { x: 3228, z: 3340 },
+    'wizard-tower': { x: 3105, z: 3158 },
+};
 // All laws flow through the vault: units drop their stacks here and the
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
 // or bank — the drop-pile pattern is the collector mechanism.)
@@ -77,11 +98,10 @@ const RUNE_MIN = 10;   // below this, shop run
 const RUNE_BUY = 80;   // per-rune-type target after shopping
 const CAST_GAP_TICKS = 5;
 
-const RING_C = { x: 3227, z: 3370 };
-const stationFor = (name: string) => {
+const stationFor = (name: string, cx: number, cz: number) => {
     const n = parseInt(name.replace(/\D/g, ''), 10) || 0;
     const ang = (n % 8) * (Math.PI / 4);
-    return { x: Math.round(RING_C.x + Math.cos(ang) * 5), z: Math.round(RING_C.z + Math.sin(ang) * 5) };
+    return { x: Math.round(cx + Math.cos(ang) * 5), z: Math.round(cz + Math.sin(ang) * 5) };
 };
 const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
@@ -149,6 +169,9 @@ class LawBot {
     private lockIndex = -1;
     private lockSince = 0;
     private lastCastTick = -99;
+
+    private get wps() { return this.site.name === 'wizard-tower' ? TOWER_WAYPOINTS : MARCH_WAYPOINTS; }
+    private get vaultTile() { return VAULTS[this.site.name] ?? VAULT; }
     private recovering = false;
 
     laws = 0;
@@ -461,8 +484,8 @@ class LawBot {
         // Checked BEFORE combat so wizard aggro can't trap a full law stack
         // at the circle indefinitely (v7.21).
         if (this.laws >= VAULT_AT) {
-            if (Math.hypot(px - VAULT.x, pz - VAULT.z) > 2) {
-                this.exec({ type: 'walkTo', x: VAULT.x, z: VAULT.z, running: true, reason: 'vault run' });
+            if (Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) > 2) {
+                this.exec({ type: 'walkTo', x: this.vaultTile.x, z: this.vaultTile.z, running: true, reason: 'vault run' });
                 this.waitTicks = 5;
                 return;
             }
@@ -478,7 +501,7 @@ class LawBot {
 
         // Loot law runes BEFORE attack/escape — the stuck-escape loop can
         // starve the loot code if it sits below (v7.23: was after gear).
-        const nearVault = Math.hypot(px - VAULT.x, pz - VAULT.z) <= 8;
+        const nearVault = Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) <= 8;
         const vaultCooldown = this.tick - this.vaultDropTick < 15;
         const lawPile = (nearVault || vaultCooldown) ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
         if (lawPile) {
@@ -502,8 +525,10 @@ class LawBot {
         // are no men near the dark-wizard circle so circle units auto-target
         // dark wizards. Ramping units (cl<10) fight men only.
         const farFromCircle = Math.hypot(px - this.site.x, pz - this.site.z) > 30;
+        const towerSite = this.site.name === 'wizard-tower';
         const prey = ramping ? /^man$|^woman$/i
             : iceTier ? /^ice warrior$/i
+            : towerSite ? (farFromCircle ? /^wizard$/i : /^wizard$|^man$|^woman$/i)
             : farFromCircle ? /^dark wizard$/i
             : /^dark wizard$|^man$|^woman$/i;
         if (!this.recovering && this.tick - this.lastAttackTick >= ATTACK_RETRY_TICKS) {
@@ -690,9 +715,9 @@ class LawBot {
             }
 
             // Use waypoint target for escape direction when marching
-            const wpIdx = this.marchWp >= 0 && this.marchWp < MARCH_WAYPOINTS.length
+            const wpIdx = this.marchWp >= 0 && this.marchWp < this.wps.length
                 ? this.marchWp : -1;
-            const escTarget = wpIdx >= 0 ? MARCH_WAYPOINTS[wpIdx] : anchor;
+            const escTarget = wpIdx >= 0 ? this.wps[wpIdx] : anchor;
             const toDist = Math.hypot(escTarget.x - px, escTarget.z - pz);
             let dx: number, dz: number;
             if (!ramping && toDist > 5) {
@@ -819,7 +844,7 @@ class LawBot {
         const myTier = Math.max(equippedTier, invTier);
         const coinsHeld = state.inventory.filter(i => /^coins$/i.test(i.name)).reduce((a, i) => a + i.count, 0);
         const nextTier = GEAR_TIERS.find(g => g.tier > myTier && coinsHeld >= g.cost);
-        const reachedCircle = this.marchWp >= MARCH_WAYPOINTS.length ||
+        const reachedCircle = this.marchWp >= this.wps.length ||
             Math.hypot(px - anchor.x, pz - anchor.z) < 16;
         if (!ramping && nextTier && reachedCircle) {
             if (Math.hypot(px - SWORDSHOP.x, pz - SWORDSHOP.z) > 3) {
@@ -918,17 +943,17 @@ class LawBot {
             // Waypoint-based march: follow a tested route east of obstacles.
             if (this.marchWp < 0) {
                 let bestDist = Infinity, bestIdx = 0;
-                for (let i = 0; i < MARCH_WAYPOINTS.length; i++) {
-                    const d = Math.hypot(px - MARCH_WAYPOINTS[i].x, pz - MARCH_WAYPOINTS[i].z);
+                for (let i = 0; i < this.wps.length; i++) {
+                    const d = Math.hypot(px - this.wps[i].x, pz - this.wps[i].z);
                     if (d < bestDist) { bestDist = d; bestIdx = i; }
                 }
-                this.marchWp = bestDist < 12 ? Math.min(bestIdx + 1, MARCH_WAYPOINTS.length) : bestIdx;
+                this.marchWp = bestDist < 12 ? Math.min(bestIdx + 1, this.wps.length) : bestIdx;
                 this.marchWpSince = this.tick;
             }
             // Crossing regression guard: claiming to be past the farm-belt
             // crossing while still south of the fence means the arrival check
             // lied — go back to the road approach and cross for real.
-            if (this.marchWp >= BELT.backTo + 2 && this.marchWp < MARCH_WAYPOINTS.length &&
+            if (this.site.name === 'varrock-circle' && this.marchWp >= BELT.backTo + 2 && this.marchWp < this.wps.length &&
                 !inGateCorridor(px, pz) &&
                 px >= BELT.x0 && px <= BELT.x1 && pz <= BELT.z1 && pz >= 3285) {
                 this.marchWp = BELT.backTo;
@@ -936,20 +961,20 @@ class LawBot {
                 console.log(`[${this.name}] MARCH-REGRESS at (${px},${pz}) — south of belt fence, back to wp${BELT.backTo}`);
             }
 
-            const wpIdx = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
-            const wp = this.marchWp >= MARCH_WAYPOINTS.length ? anchor : MARCH_WAYPOINTS[wpIdx];
+            const wpIdx = Math.min(this.marchWp, this.wps.length - 1);
+            const wp = this.marchWp >= this.wps.length ? anchor : this.wps[wpIdx];
             const distToWp = Math.hypot(px - wp.x, pz - wp.z);
 
-            if (distToWp < ((wp as any).r ?? 10) && this.marchWp < MARCH_WAYPOINTS.length) {
+            if (distToWp < ((wp as any).r ?? 10) && this.marchWp < this.wps.length) {
                 this.marchWp++;
                 this.marchWpSince = this.tick;
-                console.log(`[${this.name}] WAYPOINT ${this.marchWp}/${MARCH_WAYPOINTS.length} reached at (${px},${pz})`);
+                console.log(`[${this.name}] WAYPOINT ${this.marchWp}/${this.wps.length} reached at (${px},${pz})`);
             }
 
             const wpStall = this.tick - this.marchWpSince;
             const distToSite = Math.round(Math.hypot(px - anchor.x, pz - anchor.z));
             if (this.tick % 60 === 0) {
-                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${MARCH_WAYPOINTS.length} stall=${wpStall}`);
+                console.log(`[${this.name}] MARCH (${px},${pz}) d=${distToSite} wp=${this.marchWp}/${this.wps.length} stall=${wpStall}`);
             }
 
             // Gate-aim: near the gate WP (inside the cattle pen or on the
@@ -970,9 +995,9 @@ class LawBot {
             // Finished-route recovery: a unit past the last WP but far from
             // the circle (recovery walks drift it) re-targets the western
             // approach WP instead of cutting straight through the trees.
-            if (this.marchWp >= MARCH_WAYPOINTS.length && wpStall > 300 &&
+            if (this.marchWp >= this.wps.length && wpStall > 300 &&
                 Math.hypot(px - anchor.x, pz - anchor.z) > 20) {
-                this.marchWp = MARCH_WAYPOINTS.length - 1;
+                this.marchWp = this.wps.length - 1;
                 this.marchWpSince = this.tick;
                 console.log(`[${this.name}] MARCH-REAPPROACH from (${px},${pz})`);
             }
@@ -1000,12 +1025,12 @@ class LawBot {
                 }
             }
 
-            if (wpStall > 120 && this.marchWp < MARCH_WAYPOINTS.length) {
+            if (wpStall > 120 && this.marchWp < this.wps.length) {
                 // Direction-agnostic advance: if the NEXT waypoint is about as
                 // close as the current one, we're past the current one — stop
                 // fighting geometry we've already cleared.
-                const nxt = this.marchWp + 1 >= MARCH_WAYPOINTS.length
-                    ? anchor : MARCH_WAYPOINTS[this.marchWp + 1];
+                const nxt = this.marchWp + 1 >= this.wps.length
+                    ? anchor : this.wps[this.marchWp + 1];
                 if (Math.hypot(px - nxt.x, pz - nxt.z) < distToWp + 4) {
                     this.marchWp++;
                     this.marchWpSince = this.tick;
@@ -1039,8 +1064,8 @@ class LawBot {
                 return;
             }
 
-            const wpIdx2 = Math.min(this.marchWp, MARCH_WAYPOINTS.length - 1);
-            const curWp = this.marchWp >= MARCH_WAYPOINTS.length ? anchor : MARCH_WAYPOINTS[wpIdx2];
+            const wpIdx2 = Math.min(this.marchWp, this.wps.length - 1);
+            const curWp = this.marchWp >= this.wps.length ? anchor : this.wps[wpIdx2];
             const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
             if (!moved) {
                 this.lastFailure = 'march:cant_reach';
@@ -1062,7 +1087,7 @@ class LawBot {
             // and wait there — the next wizard pops at distance 1 and we
             // pull before any walking rival reacts.
             if (!ramping && Math.hypot(px - this.site.x, pz - this.site.z) <= 20) {
-                const st = stationFor(this.name);
+                const st = stationFor(this.name, this.site.name === 'wizard-tower' ? this.site.x : 3227, this.site.name === 'wizard-tower' ? this.site.z : 3370);
                 if (Math.hypot(px - st.x, pz - st.z) > 2) {
                     this.walkToward(px, pz, st.x, st.z, 'station');
                     this.waitTicks = 2;

@@ -12,11 +12,14 @@ await runScript(
     try { await sdk.waitForReady(120_000); } catch (_) {}
     await bot.skipTutorial();
 
-    const VAULT = { x: 3228, z: 3340 };
-    // Wait south of the vault tile — close enough to see law piles
-    // (~8 tiles, within 15-tile scan), well outside wizard aggro.
-    const WAIT = { x: 3229, z: 3332 };
-    const BANK = { x: 3185, z: 3436 };
+    // v2 two-stop patrol: the Varrock circle vault banks at Varrock
+    // West; the wizard-tower vault banks at Draynor next door.
+    const STOPS = [
+      { name: "varrock", vault: { x: 3228, z: 3340 }, wait: { x: 3229, z: 3332 }, bank: { x: 3185, z: 3436 } },
+      { name: "tower", vault: { x: 3105, z: 3158 }, wait: { x: 3107, z: 3155 }, bank: { x: 3092, z: 3243 } },
+    ];
+    let stopIdx = 0;
+    let VAULT = STOPS[0].vault, WAIT = STOPS[0].wait, BANK = STOPS[0].bank;
     // Bank at 10: proves the deposit loop quickly and keeps the exposed
     // inventory stack small (was 30 — never reached, so the pipeline's
     // final leg had never actually run).
@@ -28,6 +31,7 @@ await runScript(
     ];
     let adIdx = 0;
     let lawsBanked = 0;
+    let loopN = 0;
 
     async function isAlive() {
       const state = sdk.getState();
@@ -115,6 +119,13 @@ await runScript(
         await patrolVault();
       }
       await sdk.waitForTicks(4);
+      // Rotate stops every ~8 loops (~5 min per site).
+      if (++loopN % 8 === 0) {
+        stopIdx = (stopIdx + 1) % STOPS.length;
+        VAULT = STOPS[stopIdx].vault; WAIT = STOPS[stopIdx].wait; BANK = STOPS[stopIdx].bank;
+        console.log(`[VAULT] rotating patrol -> ${STOPS[stopIdx].name}`);
+        try { await bot.walkTo(WAIT.x, WAIT.z); } catch (_) {}
+      }
     }
   },
   { timeout: 86_400_000 }
