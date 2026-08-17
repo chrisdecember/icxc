@@ -49,7 +49,9 @@ const ICE_ENTRANCE = { x: 3008, z: 3150 };
 const ICE_SITE = { name: 'asgarnian-ice-dungeon', x: 3044, z: 9581 };
 const SWORDSHOP = { x: 3203, z: 3397 };
 const RAMP_UNTIL = 10; // avg(atk,str,def,hp) before graduating to dark wizards
-const ATTACK_RETRY_TICKS = 8;
+// v7.27: 3-tick gate — the circle is contested by rival farmers; claim
+// speed on fresh wizard spawns decides the kill share.
+const ATTACK_RETRY_TICKS = 3;
 const RELOGIN_MS = 5_000;
 const RELOGIN_MAX_MS = 60_000;
 const JUNK = /bucket|^pot$|jug|shears|tinderbox|fishing net|cowhide|raw beef|newcomer|bread/i;
