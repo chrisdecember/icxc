@@ -10,8 +10,8 @@
 // Per-bot XP-rate telemetry reveals spawn saturation per site — the data
 // that decides how far past 16 units the swarm scales.
 //
-// Laws ride as the only valuable stack so the death-keeps-3 rule protects
-// them. Junk is dropped on sight.
+// Keep-3 does NOT protect law stacks: only 1 law rune of a stack is kept
+// on death, the rest drop. The vault pipeline moves laws to safety early.
 
 import './dom-shim.js';
 import { appendFileSync } from 'node:fs';
@@ -43,10 +43,10 @@ const BARB_WAYPOINTS = [
     { x: 3210, z: 3242, r: 10 },  // northwest to open ground
     { x: 3192, z: 3258, r: 10 },  // west-northwest
     { x: 3178, z: 3280, r: 10 },  // northwest
-    { x: 3163, z: 3305, r: 10 },  // north
-    { x: 3155, z: 3340, r: 10 },  // north — stay east of wizard tower
-    { x: 3145, z: 3370, r: 10 },  // north — east of tower (3109,3354)
-    { x: 3125, z: 3395, r: 10 },  // north — safely past tower
+    { x: 3175, z: 3305, r: 10 },  // north — wide east of wizard tower
+    { x: 3180, z: 3340, r: 10 },  // north — well east of tower (3109,3354)
+    { x: 3175, z: 3370, r: 10 },  // north — safely east of tower
+    { x: 3150, z: 3395, r: 10 },  // northwest — past tower zone
     { x: 3100, z: 3410, r: 10 },  // west to village approach
     { x: 3085, z: 3420, r: 8 },   // barb village
 ];
@@ -169,6 +169,7 @@ class LawBot {
     private marchWpSince = 0;
     private forceCount = 0;
     private lastGateTick = -99;
+    private gateWalkTarget: { x: number; z: number; tick: number } | null = null;
     private lastStyleTick = -99;
     private vaultDropTick = -99;
     private lockIndex = -1;
@@ -176,6 +177,7 @@ class LawBot {
     private lastCastTick = -99;
     private stuckSince = 0;
     private lastProgressTick = 0;
+    private deepStuckCount = 0;
     lastTickMs = 0;
     connectMs = 0;
 
@@ -391,6 +393,10 @@ class LawBot {
         const px = state.player.worldX;
         const pz = state.player.worldZ;
         this.px = px; this.pz = pz;
+        if (this.tick % 50 === 0) {
+            const d = Math.round(Math.hypot(px - this.site.x, pz - this.site.z));
+            console.error(`[${this.name}] HEARTBEAT t=${this.tick} pos=(${px},${pz}) site=${this.site.name} d=${d} laws=${this.laws} wp=${this.marchWp} fail=${this.lastFailure || '-'}`);
+        }
         if (px !== this.staleX || pz !== this.staleZ) {
             this.staleX = px; this.staleZ = pz; this.staleSince = this.tick;
             // Breadcrumb tracer: every successful traversal becomes route data.
@@ -432,7 +438,12 @@ class LawBot {
         if (this.lastProgressTick === 0) this.lastProgressTick = this.tick;
         const stuckDuration = this.tick - this.lastProgressTick;
         if (stuckDuration > 600) {
-            console.warn(`[${this.name}] DEEP-STUCK ${stuckDuration} ticks at (${px},${pz}) — force relogin`);
+            this.deepStuckCount++;
+            console.warn(`[${this.name}] DEEP-STUCK ${stuckDuration} ticks at (${px},${pz}) cycle=${this.deepStuckCount} — force relogin`);
+            if (this.deepStuckCount >= 3 && this.cl < RAMP_UNTIL) {
+                this.cl = RAMP_UNTIL;
+                console.warn(`[${this.name}] force-graduated to CL ${RAMP_UNTIL} after ${this.deepStuckCount} stuck cycles`);
+            }
             this.forceDisconnect();
             void relogin(this);
             return;
@@ -442,6 +453,25 @@ class LawBot {
         const iceTier = ICE_ENABLED && this.cl >= 45;
         const barbSite = this.site.name === 'barb-village';
         const anchor = ramping ? RAMP : iceTier ? ICE_SITE : this.site;
+
+        // Tower trap: the entry portal is one-way. Bots inside idle
+        // permanently; bots approaching walk east to safety.
+        const insideTower = px >= 3104 && px <= 3114 && pz >= 3350 && pz <= 3360;
+        if (insideTower) {
+            if (this.tick % 100 === 0) console.log(`[${this.name}] TOWER-TRAPPED at (${px},${pz}) — idling`);
+            this.lastProgressTick = this.tick;
+            this.lastFailure = '';
+            this.waitTicks = 60;
+            return;
+        }
+        const nearTower = px >= 3090 && px <= 3130 && pz >= 3335 && pz <= 3370;
+        if (nearTower) {
+            if (this.tick % 20 === 0) console.log(`[${this.name}] TOWER-AVOID at (${px},${pz}) — walking east`);
+            this.walkToward(px, pz, px + 30, pz, 'tower-avoid');
+            this.lastProgressTick = this.tick;
+            this.waitTicks = 3;
+            return;
+        }
 
         // v7.30 ramp-return: a ramping unit far from the training field
         // has NO code path home — it hunts Men only, and there are none
@@ -678,11 +708,21 @@ class LawBot {
             }
         }
 
+        // Deferred gate walk: a previous tick opened a door; now walk through
+        // (separated so the server has time to process the door-open).
+        if (this.gateWalkTarget && this.tick - this.gateWalkTarget.tick >= 1) {
+            const gt = this.gateWalkTarget;
+            this.gateWalkTarget = null;
+            this.exec({ type: 'walkTo', x: gt.x, z: gt.z, running: true, reason: 'gate-through-deferred' });
+            this.waitTicks = 3;
+            return;
+        }
+
         // Stuck-escape: open closed doors/gates if reachable, otherwise jitter.
         // out_of_range = BFS build-area too small to reach target; needs jitter too.
         if (/client_rejected|out_of_range|cant_reach/.test(this.lastFailure)) {
             this.escapeTries++;
-            if (this.escapeTries > 20) {
+            if (this.escapeTries > 30) {
                 this.lastFailure = '';
                 this.escapeTries = 0;
             }
@@ -737,6 +777,47 @@ class LawBot {
                 return;
             }
 
+            // Wizard's Tower trap: bots inside the tower can't escape
+            // through auto-closing doors. Strategy:
+            // 1. Try 1-tile probes in all directions (one might work)
+            // 2. Open door + walk to door tile (not past it)
+            // 3. walkToward south for angle-probing
+            // 4. After many failures, try walkToward to known-outside tile
+            const inWizardTower = px >= 3104 && px <= 3114 && pz >= 3350 && pz <= 3360;
+            if (inWizardTower) {
+                // Large door is one-way (entry-only portal). Try interactLoc +
+                // immediate deferred walk on first few attempts; after 20 tries
+                // accept the trap and idle to avoid spamming the server.
+                if (this.escapeTries > 20) {
+                    if (this.escapeTries === 21) console.log(`[${this.name}] TOWER-TRAPPED at (${px},${pz}) — idling permanently`);
+                    this.lastFailure = '';
+                    this.lastProgressTick = this.tick;
+                    this.waitTicks = 60;
+                    return;
+                }
+
+                // Try every reachable door (Large door + internal Door)
+                const doors = (state.nearbyLocs ?? []).filter(l =>
+                    /door/i.test(l.name) && l.reachable === true &&
+                    l.optionsWithIndex.some(o => /^open$/i.test(o.text)));
+                for (const door of doors) {
+                    const opt = door.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
+                    this.exec({ type: 'interactLoc', x: door.x, z: door.z, locId: door.id, optionIndex: opt.opIndex, reason: 'tower-door' });
+                    if (!this.lastFailure) {
+                        this.gateWalkTarget = { x: door.x, z: door.z < pz ? door.z - 2 : door.z + 2, tick: this.tick };
+                        if (this.escapeTries % 5 === 0) console.log(`[${this.name}] TOWER-DOOR at (${px},${pz}) -> ${door.name}(${door.x},${door.z}) id=${door.id} op=${opt.opIndex}`);
+                        this.waitTicks = 0;
+                        return;
+                    }
+                }
+
+                // walkToward outside
+                const moved = this.walkToward(px, pz, 3109, 3345, 'tower-walkToward');
+                if (moved) { this.marchWp = -1; this.waitTicks = 2; return; }
+                this.waitTicks = 3;
+                return;
+            }
+
             // v7.24: near the circle the only gates BFS finds are the sheep-
             // field gates 10+ tiles north — opening them is pure churn (the
             // GATE-OPEN spam). Walk back toward the wizards instead.
@@ -767,22 +848,39 @@ class LawBot {
                     }
                     return Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz);
                 })[0];
-            if (reachableClosed) {
+            if (reachableClosed && !this.gateWalkTarget) {
                 const opt = reachableClosed.optionsWithIndex.find(o => /^open$/i.test(o.text))!;
                 this.exec({ type: 'interactLoc', x: reachableClosed.x, z: reachableClosed.z, locId: reachableClosed.id, optionIndex: opt.opIndex, reason: 'gate-open' });
-                console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z}) d=${Math.round(Math.hypot(reachableClosed.x - px, reachableClosed.z - pz))}`);
-                this.waitTicks = 5;
-                this.lastFailure = '';
-                this.escapeTries = 0;
+                if (this.escapeTries % 10 === 1) {
+                    console.log(`[${this.name}] GATE-OPEN at (${reachableClosed.x},${reachableClosed.z}) d=${Math.round(Math.hypot(reachableClosed.x - px, reachableClosed.z - pz))}`);
+                }
                 const gx = reachableClosed.x + Math.sign(reachableClosed.x - px);
                 const gz = reachableClosed.z + Math.sign(reachableClosed.z - pz);
-                this.exec({ type: 'walkTo', x: gx, z: gz, running: true, reason: 'gate-through' });
+                this.gateWalkTarget = { x: gx || reachableClosed.x, z: gz, tick: this.tick };
+                this.waitTicks = 2;
+                this.lastFailure = '';
                 return;
             }
 
             if (inLumbridge && this.escapeTries > 15) {
                 this.lastFailure = '';
                 this.escapeTries = 0;
+            }
+
+            // 1-tile probe: try all 8 cardinal/diagonal neighbors before
+            // the bigger jitter — catches fence/doorway traps where big
+            // steps overshoot the only valid exit tile.
+            if (this.escapeTries % 5 === 0) {
+                const dirs = [[0,-1],[0,1],[-1,0],[1,0],[-1,-1],[1,-1],[-1,1],[1,1]];
+                for (const [ddx, ddz] of dirs) {
+                    this.exec({ type: 'walkTo', x: px + ddx, z: pz + ddz, running: true, reason: 'escape-1tile' });
+                    if (!this.lastFailure) {
+                        if (this.escapeTries > 5) console.log(`[${this.name}] ESCAPE-1TILE from (${px},${pz}) -> (${px+ddx},${pz+ddz})`);
+                        this.marchWp = -1;
+                        this.waitTicks = 2;
+                        return;
+                    }
+                }
             }
 
             // Use waypoint target for escape direction when marching
@@ -1003,6 +1101,16 @@ class LawBot {
             // Lumbridge-escape: bots trapped in buildings/cabbage (west of x=3240,
             // south of z=3260) force-walk east before following waypoints.
             // Tower-bound bots march WEST — don't push them east.
+            // West-of-route escape: bots stuck west of x=3225 in the belt
+            // region (z=3290-3325) can't reach the march waypoints; walk east
+            // to the road (gtlaw05/12 trapped at ~3210,3308).
+            if (!barbSite && px < 3225 && pz >= 3290 && pz <= 3325) {
+                if (this.tick % 40 === 0) console.log(`[${this.name}] WEST-ESCAPE at (${px},${pz}) — walking east to road`);
+                this.walkToward(px, pz, 3250, pz, 'west-escape');
+                this.marchWp = -1;
+                this.waitTicks = 3;
+                return;
+            }
             if (!barbSite && px < 3240 && pz > 3150 && pz < 3292 && !inGateCorridor(px, pz)) {
                 // Fred's farm / cabbage patch (west of x=3228, north of z=3265)
                 // is fenced on its east side — the only exit is SOUTH along the
@@ -1161,7 +1269,8 @@ class LawBot {
             const wpIdx2 = Math.min(this.marchWp, this.wps.length - 1);
             const curWp = this.marchWp >= this.wps.length ? anchor : this.wps[wpIdx2];
             if (barbSite) {
-                this.exec({ type: 'walkTo', x: curWp.x, z: curWp.z, running: true, reason: 'march' });
+                const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
+                if (!moved) this.lastFailure = 'march:cant_reach';
             } else {
                 const moved = this.walkToward(px, pz, curWp.x, curWp.z, 'march');
                 if (!moved) this.lastFailure = 'march:cant_reach';
