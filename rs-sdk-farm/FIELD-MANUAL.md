@@ -13,8 +13,9 @@ Read this before writing a single line of bot code.
 - **Law rune monopoly**: kill dark wizards (they drop 3x law runes at 1/128)
   at the circle south of Varrock, funnel every rune through one vault bot,
   bank the stockpile, and run a buying desk so *all* laws flow through us.
-- **Market disruption**: 8 "mankicker" bots kick/punch every Man/Woman in
-  Lumbridge to deny pickpocket targets to rival thief bots.
+- **Market disruption**: 14 "mankicker" bots patrol all of Lumbridge
+  on 14 interlocking routes, denying pickpocket targets to rival bots.
+  25k+ interdictions, 64k+ kills logged.
 - **Doctrine**: combat units train Defensive (Block) until Defence ~50,
   then switch to kick/punch styles.
 
@@ -216,8 +217,13 @@ Proven Lumbridge→Varrock road (waypoints, radius): (3245,3235,r10),
 | Farm gate (THE gate) | (3239-3240,3301) | only crossing in z=3300 fence |
 | Trap pen gate | (3236-3238,3295-96) | do NOT use |
 | Al Kharid toll gate | (3267,3228) | pay-toll; one-way trap for lite bots |
-| Ice dungeon (underground) | (3044,9581) | via ladder ~(3008,3150) — TODO |
-| Mankicker anchors | courtyard (3222,3218), bobs-hut (3231,3210), church (3243,3210), castle-east (3234,3222), north-gate (3223,3231), general-store (3218,3243), north-road (3236,3242), east-road (3238,3225) | east-road replaced bridge-path (3245,3230) — too close to toll gate |
+| Ice dungeon chamber | (3040,9578) | via Ladder#1759 at (3008,3150) climb-down; return Ladder#1755 climb-up |
+| Ice under-ladder | (3008,9550) | landing tile underground |
+| Wizards' Tower (second front) | (3105,3158) | vault tile; prey = /^wizard$/i (not dark wizard) |
+| Tower bank (Draynor) | (3092,3243) | gtvault second stop |
+| Wydin's shop (Port Sarim) | (3014,3205) | banana supply for ice pilots |
+| Aubury's rune shop | (3253,3401) | mind+air runes for mage-tag doctrine |
+| Mankicker routes (14) | courtyard, courtyard-ccw, castle-south, church, bobs-hut, north-gate, general-store, mill-road, east-road, roam-west, roam-east, courtyard-orbit, roam-core, sweep-cw | patrol loops, not static anchors |
 
 ## 8. The vault pipeline (economy architecture)
 
@@ -253,6 +259,14 @@ bank runs, zero deaths at the current vault position.
 | ops | pkill 144 killed its own launch command | Separate kill and launch invocations |
 | ops | Reading pre-restart log lines as current | Slice logs at the deploy boundary line number |
 | telemetry | `xp=0` in all reports despite CLs climbing | `combatXp()` reads `skills[].xp` which lite state doesn't populate — **unfixed**; use CL deltas instead |
+| v7.26 | close-distance targeting wizard's own tile → instant cant_reach | walkToward with 9-angle rotation around the target |
+| v7.29 | ramp gate at CL 10 sent sub-26 trainees into wizard gangs | raised to CL 27 (clear of lvl-13 aggro band) |
+| v7.30 | demoted trainees had no code path home from circle | ramp-return: >25 tiles from RAMP + ramping → march back to Lumbridge |
+| v7.34 | NE corner idle crowd: aggro-band recovery at 1hp/10s = permanent rest | de-aggro rest: exit when no wizard within 10 tiles AND hp>=45% |
+| ice v4 | 8s attack timeout mid-fight → warrior regenerated, zero kills | ride-to-kill: loop watching combat state until fight ends, eat mid-fight |
+| ice v5 | ladder leash parked squad outside warrior aggro radius → idle logout | anchored at chamber (3040,9578) where the warriors actually are |
+| ops | game login server offline → all clients disconnect | server-monitor.sh checks every 30s, triggers fleet restart on recovery |
+| ops | pkill in watchdog kills runner clients, they crash on LoginError code 8 | runners crash-loop is expected during server outage; watchdog restarts |
 
 ## 10. Telemetry & ops patterns that worked
 
@@ -280,12 +294,12 @@ Production is a portfolio, not one site:
 
 | Stream | Units | Status |
 |---|---|---|
-| Dark-wizard circle | 5 veterans + trainee inflow | live, contested |
-| Ice dungeon (7/128) | 3 SDK pilots (gtlaw15/07/14) | live, uncontested |
-| Wizards' Tower (lvl-9 wizards drop laws) | candidate site | recon (probe v4) |
-| Shop buying (Aubury stock?) | thief-gold funded | recon (probe v4) |
-| Runecrafting (Law altar, RC 54, Entrana) | long-term | deferred — needs Rune Mysteries + RC grind |
-| Buying desk (player trades) | gtvault ads | live, no traffic |
+| Dark-wizard circle (Varrock) | 5 units (CL 27-47) | live, contested by rival mage-bots |
+| Wizards' Tower (lvl-9 wizards) | 5 units (tower squad) | live, uncontested second front |
+| Ice dungeon (7/128 drops) | 6 SDK pilots (gtlaw15/07/14/01/04/16) | live, chamber-anchored |
+| Vault pipeline | gtvault SDK bot, 2-stop patrol | live — Varrock+Tower rotation |
+| Runecrafting (Law altar, RC 54) | long-term | deferred — needs Rune Mysteries + RC grind |
+| Buying desk (player trades) | gtvault ads | live, minimal traffic |
 
 **Training pipeline (aggro-band doctrine, v7.31 era)**: the circle
 holds BOTH lvl-13 (aggro < 26) and lvl-22 (aggro < 44) dark wizards,
@@ -303,10 +317,21 @@ Promotion = copy icepilot-script.ts into bots/<name>/, move the
 account from the lawswarm roster to a runner+brain pair, update
 watchdog.sh's roster lines.
 
-**Safety layer**: watchdog.sh relaunches any dead component every
-120s (survives crashes within a container life; the pulse ps-check
-covers container restarts). Ice pilots carry the three-layer sustain
-doctrine (leash / food / hardened ladder escape).
+**Mage-tag doctrine (v7.33)**: rival mage-bots insta-tag dark wizards
+at range before melee units can walk to them. Counter: Wind Strike
+(spellComponent 1152, 1 mind + 1 air rune) on unengaged targets with
+5-tick cast gap. Supply: buy 30 minds+airs at Aubury's (3253,3401)
+when below 10 of either. Combined with aggro-band auto-engagement,
+this races the rivals for first tag.
+
+**Safety layers**:
+- watchdog.sh relaunches any dead component every 120s
+- server-monitor.sh tests login every 30s; kills fleet for clean
+  restart on recovery
+- lawswarm relogin: exponential backoff 5s→60s on disconnect
+- ice pilot three-layer sustain: food / retreat@45% / emergency@25%
+  with ladder escape retry loop
+- pulse check-ins (13-min cadence) as the cross-restart safety net
 
 ## 11. Roadmap for a better bot (ranked)
 

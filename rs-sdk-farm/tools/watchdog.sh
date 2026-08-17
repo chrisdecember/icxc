@@ -28,5 +28,6 @@ while true; do
     ensure "runner.ts $u" "$u-client" "$RS/server/webclient" "$BUN" src/lite/runner.ts "$u"
     ensure "bots/$u/script.ts" "$u" "$RS" "$BUN" "bots/$u/script.ts"
   done
+  ensure "bots/gticeprobe/script.ts" gticeprobe "$RS" "$BUN" bots/gticeprobe/script.ts
   sleep 120
 done

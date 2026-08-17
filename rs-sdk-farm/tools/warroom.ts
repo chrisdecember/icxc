@@ -71,8 +71,26 @@ for (const s of kickSeries) { if (s.k < prevK) { lifetimeKicks += prevK; lifetim
 lifetimeKicks += Math.max(0, prevK);
 const nowKP = kickSeries.at(-1) ?? { k: 0, p: 0 };
 
+// ---- mankicker disruption totals from latest DISRUPTION line
+let mkInterrupts = 0, mkKills = 0, mkXp = 0, mkOnline = "?/?";
+for (const ln of kick) {
+  const m = ln.match(/DISRUPTION kicks=\d+ punches=\d+ interrupts=(\d+) xp=(\d+) ~kills=(\d+) online=(\S+)/);
+  if (m) { mkInterrupts = +m[1]; mkXp = +m[2]; mkKills = +m[3]; mkOnline = m[4]; }
+}
+
+// ---- server status from monitor log
+const monLog = read("server-monitor.log");
+let serverStatus = "unknown";
+const monLines = monLog.split("\n").filter(Boolean);
+if (monLines.length) {
+  const last = monLines.at(-1)!;
+  if (last.includes("BACK ONLINE")) serverStatus = "online";
+  else if (last.includes("still down")) serverStatus = "offline";
+  else if (last.includes("started")) serverStatus = "checking";
+}
+
 // ---- ice squad (SDK brains): laws carried + Draynor bank runs per pilot
-const ICE_PILOTS = ["gtlaw15", "gtlaw07", "gtlaw14"];
+const ICE_PILOTS = ["gtlaw15", "gtlaw07", "gtlaw14", "gtlaw01", "gtlaw04", "gtlaw16"];
 let iceLaws = 0, iceBanks = 0, iceRetreats = 0;
 const iceRows: string[] = [];
 for (const name of ICE_PILOTS) {
@@ -241,10 +259,11 @@ font-size:.66rem;padding:.25rem .5rem;border-radius:3px;display:none;font-varian
   <div class="tile"><b>${lawsPerHr}</b><span>laws / hr</span></div>
   <div class="tile"><b>${(xpPerHr / 1000).toFixed(0)}k</b><span>swarm xp / hr</span></div>
   <div class="tile"><b>${online}</b><span>law units online</span></div>
-  <div class="tile"><b>${deaths}</b><span>deaths (deploy)</span></div>
-  <div class="tile"><b>${(lifetimeKicks / 1000).toFixed(1)}k</b><span>men kicked</span></div>
-  <div class="tile"><b>${kicksPerMin}</b><span>kicks / min</span></div>
+  <div class="tile"><b>${mkOnline}</b><span>mankickers online</span></div>
+  <div class="tile"><b>${(mkKills / 1000).toFixed(1)}k</b><span>men killed</span></div>
+  <div class="tile"><b>${(mkInterrupts / 1000).toFixed(1)}k</b><span>interdictions</span></div>
 </div>
+${serverStatus !== "online" ? `<div style="background:#2a1115;border:1px solid #5a2228;padding:.5rem .7rem;margin-bottom:1rem;font-size:.72rem;color:#f58b8b">LOGIN SERVER ${serverStatus.toUpperCase()} — fleet auto-recovery armed, monitor checking every 30s</div>` : ""}
 
 <div class="cols">
   <div class="panel"><h2>Laws held by swarm — full session</h2>
@@ -271,7 +290,7 @@ font-size:.66rem;padding:.25rem .5rem;border-radius:3px;display:none;font-varian
   <div class="panel"><h2>Pipeline events</h2>
     <ul class="feed">${feed || "<li>quiet</li>"}</ul>
     <div class="u-ft" style="margin-top:.5rem">gtvault holding ${holding} · banks at 10 · ${bankRuns.length} runs total</div>
-    <h2 style="margin-top:.8rem">Ice squad — 3 pilots (7/128 drops)</h2>
+    <h2 style="margin-top:.8rem">Ice squad — ${ICE_PILOTS.length} pilots (7/128 drops)</h2>
     <div class="u-ft">${iceStatus}</div>
   </div>
 </div>
