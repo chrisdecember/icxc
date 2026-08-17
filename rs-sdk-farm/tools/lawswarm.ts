@@ -54,7 +54,7 @@ const BARB_WAYPOINTS = [
 // Varrock West bank, tower vault -> Draynor bank (right next door).
 const VAULTS: Record<string, { x: number; z: number }> = {
     'varrock-circle': { x: 3228, z: 3340 },
-    'barb-village': { x: 3090, z: 3410 },
+    'barb-village': { x: 3228, z: 3340 },
 };
 // All laws flow through the vault: units drop their stacks here and the
 // gtvault SDK bot hoovers + banks them. (Lite clients cannot player-trade
@@ -528,7 +528,7 @@ class LawBot {
         // Checked BEFORE combat so wizard aggro can't trap a full law stack
         // at the circle indefinitely (v7.21).
         const vaultThresh = barbSite ? VAULT_AT_BARB : VAULT_AT;
-        if (this.laws >= vaultThresh && !barbSite) {
+        if (this.laws >= vaultThresh) {
             if (Math.hypot(px - this.vaultTile.x, pz - this.vaultTile.z) > 2) {
                 this.exec({ type: 'walkTo', x: this.vaultTile.x, z: this.vaultTile.z, running: true, reason: 'vault run' });
                 this.waitTicks = 5;
@@ -552,8 +552,7 @@ class LawBot {
             const nearby = state.groundItems.slice(0, 8).map(g => `${g.name}(${g.x},${g.z})`).join(', ');
             console.log(`[${this.name}] GROUND-ITEMS [${state.groundItems.length}]: ${nearby}`);
         }
-        const vaultSuppressed = !barbSite && (nearVault || vaultCooldown);
-        const lawPile = vaultSuppressed ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
+        const lawPile = (nearVault || vaultCooldown) ? undefined : state.groundItems.find(g => /law rune/i.test(g.name));
         if (lawPile) {
             console.log(`[${this.name}] LAW-PICKUP at (${lawPile.x},${lawPile.z}) laws=${this.laws}+${lawPile.count ?? '?'}`);
             this.exec({ type: 'pickupItem', x: lawPile.x, z: lawPile.z, itemId: lawPile.id, reason: 'LAW' });
