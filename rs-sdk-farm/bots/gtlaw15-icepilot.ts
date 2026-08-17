@@ -1,13 +1,17 @@
 import { runScript } from "../../sdk/runner";
 
-// GTLAW15 — ICE PILOT. First veteran transferred from the lite swarm to
-// an SDK brain to open the 7/128 law tier (2.3x the dark-wizard rate).
-// Route + hazards from gticeprobe: Ladder#1759(3008,3150) Climb-Down ->
-// (3008,9550); muggers west of entrance (harmless at CL 50+); hobgoblin
-// belt mid-route (aggros under CL 56 — tanky enough to walk through);
-// ice warriors lvl 57 at (3040,9582), always aggro. No food: the ladder
-// is the recovery valve — warriors cannot follow through a climb.
-// Laws bank at Draynor. Death costs a walk, not the stack (keep-3).
+// GTLAW15 — ICE PILOT v3: reliable emergency + sustain doctrine.
+//
+// v2 lesson: warriors ALWAYS aggro and walk to us, so the pilot never
+// needs to reach the chamber — it fights ANCHORED 2 tiles from the
+// under-ladder escape hatch. Three sustain layers:
+//   1. LEASH   — never fight >8 tiles from the ladder; bait east and
+//                fall back when no warrior is in view.
+//   2. FOOD    — bananas from Wydin's (Port Sarim); eat under 70% hp.
+//   3. ESCAPE  — retreat at 50%; under 30% EMERGENCY: interactLoc the
+//                ladder directly (walks + climbs in one call), retried
+//                until surfaced. Warriors cannot follow a climb.
+// Laws bank at Draynor at 12+. Death keeps the law stack (keep-3).
 
 await runScript(
   async (ctx) => {
@@ -17,85 +21,106 @@ await runScript(
 
     const LADDER_DOWN = { x: 3008, z: 3150 };
     const UNDER_LADDER = { x: 3008, z: 9550 };
-    const HOPS = [
-      { x: 3016, z: 9554 }, { x: 3024, z: 9560 }, { x: 3032, z: 9566 },
-      { x: 3040, z: 9573 }, { x: 3044, z: 9581 },
-    ];
+    const BAIT_SPOT = { x: 3018, z: 9556 };
+    const COMBAT_LEASH = 8;
     const DRAYNOR_BANK = { x: 3092, z: 3243 };
+    const WYDIN = { x: 3014, z: 3205 };
     const BANK_AT = 12;
-    const RETREAT_FRAC = 0.4;
+    const EAT_FRAC = 0.7;
+    const RETREAT_FRAC = 0.5;
+    const EMERGENCY_FRAC = 0.3;
     const RESUME_FRAC = 0.8;
+    const FOOD_BUY = 16;
+    const FOOD = /banana|bread|cake|meat|anchovies|shrimp/i;
 
     const p = () => sdk.getState()?.player as any;
     const under = () => (p()?.worldZ ?? 0) > 6000;
     const pos = () => { const q = p(); return q ? `(${q.worldX},${q.worldZ})` : "(?)"; };
     const hpFrac = () => { const q = p(); return q && q.maxHp > 0 ? q.hp / q.maxHp : 1; };
     const laws = () => sdk.countInventoryItems(/law rune/i);
-    let banked = 0, kills = 0;
+    const food = () => sdk.countInventoryItems(FOOD);
+    const distLadder = () => { const q = p(); return q ? Math.hypot(q.worldX - UNDER_LADDER.x, q.worldZ - UNDER_LADDER.z) : 99; };
+    let banked = 0, kills = 0, retreats = 0, emergencies = 0;
 
-    async function climbDown() {
-      const l = sdk.findNearbyLoc(/^ladder$/i);
-      if (!l) return false;
-      try { await bot.interactLoc(l, /climb[- ]?down/i); } catch (_) {}
-      await sdk.waitForTicks(3);
-      return under();
-    }
-    async function climbUp() {
-      const l = sdk.findNearbyLoc(/^ladder$/i);
-      if (!l) return false;
-      try { await bot.interactLoc(l, /climb[- ]?up/i); } catch (_) {}
-      await sdk.waitForTicks(3);
+    async function surfaceViaLadder(emergency: boolean) {
+      for (let i = 0; i < 8 && under(); i++) {
+        if (!emergency && distLadder() > 2) {
+          try { await bot.walkTo(UNDER_LADDER.x, UNDER_LADDER.z, 2); } catch (_) {}
+        }
+        const l = sdk.findNearbyLoc(/^ladder$/i);
+        if (l) { try { await bot.interactLoc(l, /climb[- ]?up/i); } catch (_) {} }
+        await sdk.waitForTicks(3);
+      }
       return !under();
     }
 
-    console.log(`[ICE] pilot online at ${pos()} laws=${laws()}`);
+    console.log(`[ICE] pilot v3 online at ${pos()} laws=${laws()} food=${food()}`);
 
     while (true) {
       const st = sdk.getState();
       if (!st?.player) { await sdk.waitForTicks(4); continue; }
 
       if (!under()) {
-        // Surface logic: bank, rest, or head down.
+        // Bank leg.
         if (laws() >= BANK_AT) {
-          console.log(`[ICE] BANK-RUN with ${laws()} laws from ${pos()}`);
+          console.log(`[ICE] BANK-RUN with ${laws()} laws`);
           try { await bot.walkTo(DRAYNOR_BANK.x, DRAYNOR_BANK.z, 3); } catch (_) {}
           try {
             await bot.openBank();
             await bot.depositItem(/law rune/i, -1);
             await bot.closeBank();
             banked += 1;
-            console.log(`[ICE] BANKED at Draynor — run #${banked}, inventory now ${laws()} laws`);
+            console.log(`[ICE] BANKED at Draynor — run #${banked}`);
           } catch (e) { console.log(`[ICE] bank failed: ${e}`); }
           continue;
         }
+        // Provision leg: restock bananas when dry (bananas ~2gp at Wydin's).
+        if (food() === 0 && sdk.countInventoryItems(/^coins$/i) >= 50) {
+          console.log(`[ICE] PROVISION run to Wydin's`);
+          try {
+            await bot.walkTo(WYDIN.x, WYDIN.z, 3);
+            await bot.openShop(/wydin/i);
+            await bot.buyFromShop(/banana/i, FOOD_BUY);
+            console.log(`[ICE] provisioned ${food()} food`);
+          } catch (e) { console.log(`[ICE] provision failed (continuing without): ${e}`); }
+        }
+        // Rest near the surface ladder until healthy, then descend.
         const nearLadder = Math.hypot((p()?.worldX ?? 0) - LADDER_DOWN.x, (p()?.worldZ ?? 0) - LADDER_DOWN.z) <= 6;
-        if (nearLadder && hpFrac() < RESUME_FRAC) {
-          await sdk.waitForTicks(16); // surface rest — nothing aggros here
-          continue;
-        }
+        if (nearLadder && hpFrac() < RESUME_FRAC) { await sdk.waitForTicks(16); continue; }
         if (!nearLadder) {
-          try { await bot.walkTo(LADDER_DOWN.x, LADDER_DOWN.z, 3); } catch (e) { console.log(`[ICE] surface walk err: ${e}`); await sdk.waitForTicks(8); }
+          try { await bot.walkTo(LADDER_DOWN.x, LADDER_DOWN.z, 3); } catch (e) { await sdk.waitForTicks(8); }
           continue;
         }
-        if (!(await climbDown())) { await sdk.waitForTicks(6); continue; }
-        console.log(`[ICE] descended at ${pos()} hp=${p()?.hp}/${p()?.maxHp}`);
+        const l = sdk.findNearbyLoc(/^ladder$/i);
+        if (l) { try { await bot.interactLoc(l, /climb[- ]?down/i); } catch (_) {} }
+        await sdk.waitForTicks(3);
+        if (under()) console.log(`[ICE] descended at ${pos()} hp=${p()?.hp}/${p()?.maxHp} food=${food()}`);
         continue;
       }
 
-      // Underground logic.
+      // ---- underground ----
+      // Layer 3: escape. Emergency skips the walk — interactLoc paths for us.
+      if (hpFrac() < EMERGENCY_FRAC) {
+        emergencies++;
+        console.log(`[ICE] EMERGENCY hp=${p()?.hp}/${p()?.maxHp} at ${pos()} — direct ladder`);
+        await surfaceViaLadder(true);
+        continue;
+      }
       if (hpFrac() < RETREAT_FRAC) {
-        console.log(`[ICE] RETREAT hp=${p()?.hp}/${p()?.maxHp} laws=${laws()} at ${pos()}`);
-        try { await bot.walkTo(UNDER_LADDER.x, UNDER_LADDER.z, 3); } catch (_) {}
-        await climbUp();
+        retreats++;
+        console.log(`[ICE] RETREAT hp=${p()?.hp}/${p()?.maxHp} laws=${laws()} (#${retreats})`);
+        await surfaceViaLadder(false);
         continue;
       }
-      if (laws() >= BANK_AT) {
-        try { await bot.walkTo(UNDER_LADDER.x, UNDER_LADDER.z, 3); } catch (_) {}
-        await climbUp();
+      // Layer 2: food.
+      if (hpFrac() < EAT_FRAC && food() > 0) {
+        try { await bot.eatFood(FOOD); } catch (_) {}
+        await sdk.waitForTicks(2);
         continue;
       }
+      if (laws() >= BANK_AT) { await surfaceViaLadder(false); continue; }
 
-      // Loot first — law piles are the entire point.
+      // Loot law piles first.
       const pile = sdk.findGroundItem(/law rune/i);
       if (pile) {
         try { await bot.pickupItem(pile); console.log(`[ICE] LOOT laws -> ${laws()}`); } catch (_) {}
@@ -103,35 +128,28 @@ await runScript(
         continue;
       }
 
-      // Fight: nearest ice warrior.
+      // Layer 1: leash — fall back to the anchor before fighting farther out.
+      if (distLadder() > COMBAT_LEASH) {
+        try { await bot.walkTo(UNDER_LADDER.x + 2, UNDER_LADDER.z + 1, 2); } catch (_) {}
+        await sdk.waitForTicks(2);
+        continue;
+      }
+
       const warrior = sdk.findNearbyNpc(/ice warrior/i);
       if (warrior) {
         try {
-          const r = await bot.attack(warrior, 8000);
+          await bot.attack(warrior, 8000);
           kills++;
-          if (kills % 5 === 0) console.log(`[ICE] ~${kills} engagements, laws=${laws()}, hp=${p()?.hp}/${p()?.maxHp}`);
+          if (kills % 5 === 0) console.log(`[ICE] ~${kills} engagements, laws=${laws()}, hp=${p()?.hp}/${p()?.maxHp}, food=${food()}`);
         } catch (_) {}
         await sdk.waitForTicks(2);
         continue;
       }
 
-      // No warrior in view: push toward the chamber. The SDK pathfinder
-      // has full dungeon collision data and routes on its own — the old
-      // hop chain was a lite-BFS relic and its first hop (3016,9554) is
-      // literally a blocked tile, which wedged the pilot in a retry
-      // loop for half an hour. Try chamber-adjacent targets with wide
-      // radii; back off instead of spamming when none path.
-      let moved = false;
-      for (const t of [{ x: 3040, z: 9582, r: 6 }, { x: 3044, z: 9581, r: 8 }, { x: 3030, z: 9572, r: 8 }]) {
-        try {
-          const r: any = await bot.walkTo(t.x, t.z, t.r);
-          if (r?.success !== false) { moved = true; break; }
-        } catch (_) {}
-      }
-      if (!moved) {
-        console.log(`[ICE] nav stuck at ${pos()} — backing off`);
-        await sdk.waitForTicks(10);
-      }
+      // No warrior in view: bait east briefly, then return to the anchor.
+      try { await bot.walkTo(BAIT_SPOT.x, BAIT_SPOT.z, 3); } catch (_) {}
+      await sdk.waitForTicks(6);
+      try { await bot.walkTo(UNDER_LADDER.x + 2, UNDER_LADDER.z + 1, 2); } catch (_) {}
       await sdk.waitForTicks(2);
     }
   },
