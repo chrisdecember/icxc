@@ -26,17 +26,26 @@ const RELOGIN_MAX_MS = 60_000;
 const PUNCH_PERIOD = 150;
 const PUNCH_WINDOW = 25;
 
-// Patrol fan around Lumbridge: castle courtyard, Bob's axe hut, the church,
-// the north gate and the north road — everywhere Men/Women wander.
-const ANCHORS = [
-    { name: 'courtyard', x: 3222, z: 3218 },
-    { name: 'bobs-hut', x: 3231, z: 3210 },
-    { name: 'church', x: 3243, z: 3210 },
-    { name: 'castle-east', x: 3234, z: 3222 },
-    { name: 'north-gate', x: 3223, z: 3231 },
-    { name: 'general-store', x: 3218, z: 3243 },
-    { name: 'north-road', x: 3236, z: 3242 },
-    { name: 'east-road', x: 3238, z: 3225 },
+// v2 TOTAL DENIAL: static posts left coverage gaps rivals farmed. Each
+// unit now walks a patrol LOOP; loops interlock to blanket every Man
+// spawn on the Lumbridge ground level. Units attack while moving —
+// zero idle ticks — and any Man standing beside a rival PLAYER (a
+// pickpocket in progress) is priority target #1.
+const ROUTES: { name: string; wps: { x: number; z: number }[] }[] = [
+    { name: 'courtyard', wps: [{ x: 3222, z: 3218 }, { x: 3217, z: 3225 }, { x: 3225, z: 3227 }, { x: 3227, z: 3219 }] },
+    { name: 'castle-south', wps: [{ x: 3216, z: 3211 }, { x: 3210, z: 3214 }, { x: 3221, z: 3208 }] },
+    { name: 'church', wps: [{ x: 3243, z: 3210 }, { x: 3247, z: 3215 }, { x: 3240, z: 3216 }, { x: 3246, z: 3206 }] },
+    { name: 'bobs-hut', wps: [{ x: 3231, z: 3210 }, { x: 3228, z: 3204 }, { x: 3236, z: 3206 }] },
+    { name: 'north-gate', wps: [{ x: 3223, z: 3231 }, { x: 3218, z: 3238 }, { x: 3228, z: 3236 }] },
+    { name: 'general-store', wps: [{ x: 3218, z: 3243 }, { x: 3212, z: 3246 }, { x: 3222, z: 3248 }] },
+    { name: 'mill-road', wps: [{ x: 3236, z: 3242 }, { x: 3230, z: 3246 }, { x: 3240, z: 3248 }] },
+    { name: 'east-road', wps: [{ x: 3238, z: 3225 }, { x: 3233, z: 3228 }, { x: 3243, z: 3221 }] },
+    { name: 'roam-west', wps: [{ x: 3211, z: 3214 }, { x: 3216, z: 3230 }, { x: 3214, z: 3244 }, { x: 3222, z: 3234 }, { x: 3218, z: 3220 }] },
+    { name: 'roam-east', wps: [{ x: 3240, z: 3212 }, { x: 3243, z: 3222 }, { x: 3237, z: 3235 }, { x: 3232, z: 3222 }, { x: 3235, z: 3211 }] },
+    { name: 'roam-north', wps: [{ x: 3222, z: 3250 }, { x: 3232, z: 3248 }, { x: 3240, z: 3244 }, { x: 3228, z: 3240 }, { x: 3216, z: 3246 }] },
+    { name: 'roam-core', wps: [{ x: 3222, z: 3215 }, { x: 3230, z: 3218 }, { x: 3238, z: 3218 }, { x: 3230, z: 3226 }, { x: 3222, z: 3226 }] },
+    { name: 'sweep-cw', wps: [{ x: 3218, z: 3212 }, { x: 3240, z: 3212 }, { x: 3242, z: 3226 }, { x: 3236, z: 3244 }, { x: 3218, z: 3244 }, { x: 3216, z: 3226 }] },
+    { name: 'sweep-ccw', wps: [{ x: 3216, z: 3226 }, { x: 3218, z: 3244 }, { x: 3236, z: 3244 }, { x: 3242, z: 3226 }, { x: 3240, z: 3212 }, { x: 3218, z: 3212 }] },
 ];
 
 const TAUNTS = [
@@ -76,10 +85,27 @@ class KickBot {
     pz = 0;
     styleNow = '?';
 
+    private wpIdx = 0;
+    interrupts = 0;
+
     constructor(
         readonly name: string,
-        readonly anchor: { name: string; x: number; z: number }
+        readonly route: { name: string; wps: { x: number; z: number }[] }
     ) {}
+
+    // Current patrol waypoint — the moving "anchor" all leash/escape
+    // logic measures against.
+    get anchor(): { name: string; x: number; z: number } {
+        const wp = this.route.wps[this.wpIdx % this.route.wps.length];
+        return { name: this.route.name, x: wp.x, z: wp.z };
+    }
+
+    private advanceWp(px: number, pz: number): void {
+        const wp = this.route.wps[this.wpIdx % this.route.wps.length];
+        if (Math.hypot(px - wp.x, pz - wp.z) <= 3) {
+            this.wpIdx = (this.wpIdx + 1) % this.route.wps.length;
+        }
+    }
 
     get online(): boolean {
         return this.client !== null && this.client.isInGame();
@@ -263,11 +289,18 @@ class KickBot {
         }
         this.escapeTries = 0;
 
-        // Hunt: any Man/Woman with an Attack option, reachable first.
+        // Hunt: any Man/Woman with an Attack option. Priority #1 is prey
+        // standing beside a rival PLAYER — that adjacency IS a pickpocket
+        // in progress; kicking that Man out of their hands is the mission.
+        const players = state.nearbyPlayers ?? [];
+        const beingRobbed = (n: { x: number; z: number }) =>
+            players.some(pl => Math.hypot((pl as any).x - n.x, (pl as any).z - n.z) <= 1.5);
         const preyAll = state.nearbyNpcs
             .filter(n => PREY.test(n.name))
             .filter(n => n.optionsWithIndex.some(o => /attack/i.test(o.text)))
             .sort((a, b) => {
+                const ai = beingRobbed(a) ? 0 : 1, bi = beingRobbed(b) ? 0 : 1;
+                if (ai !== bi) return ai - bi;
                 const ar = a.reachable !== false ? 0 : 1;
                 const br = b.reachable !== false ? 0 : 1;
                 return ar - br || a.distance - b.distance;
@@ -281,6 +314,10 @@ class KickBot {
             this.lastAttackTick = this.tick;
             if (!this.lastFailure) {
                 if (punchTime) this.punches++; else this.kicks++;
+                if (beingRobbed(target)) {
+                    this.interrupts++;
+                    if (this.interrupts % 10 === 1) console.log(`[${this.name}] INTERRUPT #${this.interrupts} — kicked a Man out of a rival's hands at (${target.x},${target.z})`);
+                }
                 if (this.tick - this.lastTaunt > 3000 && (this.kicks + this.punches) % 250 === 100) {
                     this.lastTaunt = this.tick;
                     this.exec({ type: 'say', message: TAUNTS[(this.kicks + this.tick) % TAUNTS.length], reason: 'taunt' });
@@ -289,22 +326,20 @@ class KickBot {
             return;
         }
 
-        // Stalk a visible-but-unreachable target, but only near the anchor —
+        // Stalk a visible-but-unreachable target, but only near the route —
         // chasing beyond leash distance traps bots at gates/walls (mankicker8).
         if (!target && visible && toAnchor <= 15) {
             this.exec({ type: 'walkTo', x: visible.x, z: visible.z, running: false, reason: 'stalk' });
             this.waitTicks = 3;
             return;
         }
-        if (toAnchor > 12) {
-            this.exec({ type: 'walkTo', x: this.anchor.x, z: this.anchor.z, running: true, reason: 'patrol-return' });
-            this.waitTicks = 4;
-            return;
-        }
-        const dx = (2 + this.tick % 6) * ((this.tick + px) % 2 === 0 ? 1 : -1);
-        const dz = (2 + (this.tick * 3) % 6) * ((this.tick + pz) % 2 === 0 ? 1 : -1);
-        this.exec({ type: 'walkTo', x: px + dx, z: pz + dz, reason: 'patrol-scout' });
-        this.waitTicks = 5;
+
+        // No target: PATROL. Advance the loop and keep moving — the route
+        // network IS the coverage; a standing kicker is mission failure.
+        this.advanceWp(px, pz);
+        const wp = this.anchor;
+        this.exec({ type: 'walkTo', x: wp.x, z: wp.z, running: toAnchor > 10, reason: 'patrol' });
+        this.waitTicks = 2;
     }
 }
 
@@ -328,7 +363,7 @@ async function readEnv(bot: string): Promise<Record<string, string>> {
 }
 
 let shuttingDown = false;
-const bots: KickBot[] = names.map((n, i) => new KickBot(n, ANCHORS[i % ANCHORS.length]));
+const bots: KickBot[] = names.map((n, i) => new KickBot(n, ROUTES[i % ROUTES.length]));
 
 async function login(bot: KickBot): Promise<void> {
     const env = await readEnv(bot.name);
@@ -363,11 +398,11 @@ async function relogin(bot: KickBot): Promise<void> {
     }
 }
 
-console.log(`[mankickers] deploying ${bots.length} disruptors across ${Math.min(bots.length, ANCHORS.length)} Lumbridge posts`);
+console.log(`[mankickers] deploying ${bots.length} disruptors across ${Math.min(bots.length, ROUTES.length)} Lumbridge patrol routes`);
 for (const bot of bots) {
     try {
         await login(bot);
-        console.log(`[mankickers] ${bot.name} online -> ${bot.anchor.name} (${bot.anchor.x},${bot.anchor.z})`);
+        console.log(`[mankickers] ${bot.name} online -> route ${bot.route.name} (${bot.route.wps.length} wps)`);
     } catch (e) {
         console.error(`[mankickers] ${bot.name} failed login: ${(e as Error).message} - background retry`);
         void relogin(bot);
@@ -379,15 +414,16 @@ const report = setInterval(() => {
     const totalKicks = bots.reduce((a, b) => a + b.kicks, 0);
     const totalPunches = bots.reduce((a, b) => a + b.punches, 0);
     const totalXp = bots.reduce((a, b) => a + b.xpGained, 0);
+    const totalInts = bots.reduce((a, b) => a + b.interrupts, 0);
     const online = bots.filter(b => b.online).length;
     // ~37 combat xp per Man (7hp x 4/dmg + hp share) — estimate, not a count.
     const estKills = Math.round(totalXp / 37);
     console.log(
-        `[mankickers] DISRUPTION kicks=${totalKicks} punches=${totalPunches} xp=${totalXp} ~kills=${estKills} online=${online}/${bots.length}`
+        `[mankickers] DISRUPTION kicks=${totalKicks} punches=${totalPunches} interrupts=${totalInts} xp=${totalXp} ~kills=${estKills} online=${online}/${bots.length}`
     );
     for (const b of bots) {
         console.log(
-            `[mankickers]   ${b.name} cl=${b.cl} hp=${b.hp} style=${b.styleNow} kicks=${b.kicks} punches=${b.punches} xp=${b.xpGained} deaths=${b.deaths} pos=(${b.px},${b.pz}) @${b.anchor.name} ${b.online ? '' : 'OFFLINE'}`
+            `[mankickers]   ${b.name} cl=${b.cl} hp=${b.hp} style=${b.styleNow} kicks=${b.kicks} punches=${b.punches} ints=${b.interrupts} xp=${b.xpGained} deaths=${b.deaths} pos=(${b.px},${b.pz}) @${b.route.name} ${b.online ? '' : 'OFFLINE'}`
         );
     }
 }, 60_000);
