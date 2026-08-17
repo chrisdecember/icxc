@@ -36,12 +36,15 @@ const SITES = [
     { name: 'varrock-circle', x: 3225, z: 3374 },
     { name: 'wizard-tower', x: 3109, z: 3163 },
 ];
-// Tower route: Lumbridge -> the west road -> Draynor outskirts -> tower.
-// Open road terrain; MARCH-FORCE grinds through the rough spots.
+// Tower route: Lumbridge -> SOUTH to clear castle -> west road -> tower.
+// The old wp0 at (3190,3212) was a straight west walk through Lumbridge
+// castle walls — bots oscillated at (3208-3220,3207-3231) for 500+ ticks
+// and never arrived. Route south first to bypass the castle.
 const TOWER_WAYPOINTS = [
-    { x: 3190, z: 3212, r: 10 },
-    { x: 3170, z: 3208, r: 10 },
-    { x: 3150, z: 3205, r: 10 },
+    { x: 3218, z: 3195, r: 8 },
+    { x: 3198, z: 3195, r: 10 },
+    { x: 3180, z: 3208, r: 10 },
+    { x: 3160, z: 3205, r: 10 },
     { x: 3136, z: 3201, r: 10 },
     { x: 3120, z: 3190, r: 10 },
     { x: 3110, z: 3170, r: 8 },
@@ -169,6 +172,8 @@ class LawBot {
     private lockIndex = -1;
     private lockSince = 0;
     private lastCastTick = -99;
+    private stuckSince = 0;
+    private lastProgressTick = 0;
     lastTickMs = 0;
     connectMs = 0;
 
@@ -402,6 +407,24 @@ class LawBot {
                 this.lastFailure = 'tutorial:no-guide-in-range';
                 this.waitTicks = 5;
             }
+            return;
+        }
+
+        // Deep-stuck failsafe: if the bot hasn't made progress (gained
+        // xp, picked up laws, completed a waypoint, or reached its anchor)
+        // for 600 ticks, it's permanently stuck in geometry. Force
+        // disconnect — respawn in Lumbridge is a clean reset.
+        const atAnchor = Math.hypot(px - this.site.x, pz - this.site.z) < 20 ||
+            (this.cl < RAMP_UNTIL && Math.hypot(px - RAMP.x, pz - RAMP.z) < 20);
+        if (atAnchor || this.laws > 0) {
+            this.lastProgressTick = this.tick;
+        }
+        if (this.lastProgressTick === 0) this.lastProgressTick = this.tick;
+        const stuckDuration = this.tick - this.lastProgressTick;
+        if (stuckDuration > 600) {
+            console.warn(`[${this.name}] DEEP-STUCK ${stuckDuration} ticks at (${px},${pz}) — force relogin`);
+            this.forceDisconnect();
+            void relogin(this);
             return;
         }
 
@@ -999,6 +1022,7 @@ class LawBot {
             if (distToWp < ((wp as any).r ?? 10) && this.marchWp < this.wps.length) {
                 this.marchWp++;
                 this.marchWpSince = this.tick;
+                this.lastProgressTick = this.tick;
                 console.log(`[${this.name}] WAYPOINT ${this.marchWp}/${this.wps.length} reached at (${px},${pz})`);
             }
 
@@ -1014,7 +1038,7 @@ class LawBot {
             if (wpStall > 800) {
                 console.log(`[${this.name}] MARCH-RESET stall=${wpStall} at (${px},${pz}) — walking to open ground`);
                 const resetTile = towerSite
-                    ? { x: 3190, z: 3220 }
+                    ? { x: 3218, z: 3195 }
                     : { x: 3245, z: 3235 };
                 this.walkToward(px, pz, resetTile.x, resetTile.z, 'march-reset');
                 this.marchWp = 0;
